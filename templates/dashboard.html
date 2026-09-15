@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aqlli va Xavfsiz Ferma - Boshqaruv Markazi</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; background-color: #0b0f19; color: #f3f4f6; }
+    .glass-card { background: rgba(17, 24, 39, 0.85); backdrop-filter: blur(14px); border: 1px solid rgba(255, 255, 255, 0.08); }
+    .neon-red { box-shadow: 0 0 16px rgba(239, 68, 68, 0.5); border-color: rgba(239, 68, 68, 0.8); }
+    .neon-green { box-shadow: 0 0 16px rgba(16, 185, 129, 0.4); border-color: rgba(16, 185, 129, 0.7); }
+    .neon-amber { box-shadow: 0 0 16px rgba(245, 158, 11, 0.4); border-color: rgba(245, 158, 11, 0.7); }
+  </style>
+</head>
+<body class="min-h-screen p-4 md:p-6 flex flex-col justify-between">
+
+  <!-- Header -->
+  <header class="glass-card rounded-2xl p-4 mb-4 flex flex-wrap items-center justify-between gap-4">
+    <div class="flex items-center gap-3">
+      <div class="w-12 h-12 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center text-white text-2xl shadow-lg">
+        <i class="fa-solid fa-wheat-awn"></i>
+      </div>
+      <div>
+        <h1 class="text-xl md:text-2xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
+          Aqlli & Xavfsiz Ferma
+        </h1>
+        <p class="text-xs text-gray-400">
+          HTU21 I2C • Analog ADC Tuproq • 8MB PSRAM Video • HLK-LD2410C Radar • 20s PTZ Patrul
+        </p>
+      </div>
+    </div>
+
+    <!-- Live Status & Battery Quick Pill -->
+    <div class="flex items-center gap-3">
+      <!-- Battery Indicator Top Pill -->
+      <div id="topBattPill" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 bg-gray-800/80 border border-gray-700">
+        <i id="topBattIcon" class="fa-solid fa-battery-full text-emerald-400 text-sm"></i>
+        <span id="topBattText" class="font-mono text-gray-200">--% (4.2V)</span>
+      </div>
+
+      <div id="statusBadge" class="px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 bg-emerald-950/60 text-emerald-400 border border-emerald-500/30">
+        <i class="fa-solid fa-shield-halved"></i>
+        <span id="statusText">Xavfsizlik: Tinch</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- DEVICE STATUS BAR: GATEWAY & ENDPOINT PARAMETERS -->
+  <section class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+
+    <!-- 1. GATEWAY DEVICE STATUS -->
+    <div id="gatewayCard" class="glass-card rounded-2xl p-4 border transition-all duration-300">
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-cyan-950/70 text-cyan-400 flex items-center justify-center border border-cyan-500/30">
+            <i class="fa-solid fa-tower-broadcast text-sm"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-gray-200">Gateway (Plata 2)</h3>
+            <span class="text-[11px] text-gray-400">Qabul Qiluvchi Tugun</span>
+          </div>
+        </div>
+        <div id="gatewayBadge" class="px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 bg-red-950 text-red-400 border border-red-800">
+          <span class="w-2 h-2 rounded-full bg-red-500"></span>
+          <span id="gatewayStatusText">OFFLINE</span>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-gray-800/80 text-xs">
+        <div>
+          <span class="text-gray-400 block text-[10px]">Gateway IP:</span>
+          <span id="gatewayIp" class="font-mono text-cyan-400 font-bold">Ulanmagan</span>
+        </div>
+        <div>
+          <span class="text-gray-400 block text-[10px]">Wi-Fi Signali:</span>
+          <span id="gatewayRssi" class="font-mono text-gray-300">-- dBm</span>
+        </div>
+        <div>
+          <span class="text-gray-400 block text-[10px]">Uzatilgan Paketlar:</span>
+          <span id="gatewayPackets" class="font-mono text-emerald-400 font-bold">0</span>
+        </div>
+      </div>
+      <div class="mt-2 text-[11px] text-gray-400 flex justify-between">
+        <span>Aloqa: <span class="text-gray-300">Ferma Hotspot</span></span>
+        <span>Oxirgi signal: <span id="gatewayLastSeen" class="text-cyan-300 font-mono">--</span></span>
+      </div>
+    </div>
+
+    <!-- 2. ENDPOINT DEVICE STATUS -->
+    <div id="endpointCard" class="glass-card rounded-2xl p-4 border transition-all duration-300">
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-emerald-950/70 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+            <i class="fa-solid fa-tree text-sm"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-gray-200">Endpoint (Plata 1)</h3>
+            <span class="text-[11px] text-gray-400">Dala Tuguni (OV2640 + Sensorlar)</span>
+          </div>
+        </div>
+        <div id="endpointBadge" class="px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 bg-red-950 text-red-400 border border-red-800">
+          <span class="w-2 h-2 rounded-full bg-red-500"></span>
+          <span id="endpointStatusText">OFFLINE</span>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-gray-800/80 text-xs">
+        <div>
+          <span class="text-gray-400 block text-[10px]">Endpoint IP:</span>
+          <span id="endpointIp" class="font-mono text-emerald-400 font-bold">10.24.95.110</span>
+        </div>
+        <div>
+          <span class="text-gray-400 block text-[10px]">Kamera Oqimi:</span>
+          <span id="endpointCamera" class="font-mono text-emerald-400 font-bold">Port 81 (/stream)</span>
+        </div>
+        <div>
+          <span class="text-gray-400 block text-[10px]">Batareya Quvvati:</span>
+          <span id="endpointBatt" class="font-mono text-amber-300 font-bold">--% (--V)</span>
+        </div>
+      </div>
+      <div class="mt-2 text-[11px] text-gray-400 flex justify-between">
+        <span>Aloqa: <span class="text-gray-300">Ferma Hotspot + Sub-1GHz HaLow</span></span>
+        <span>Oxirgi telemetriya: <span id="endpointLastSeen" class="text-emerald-300 font-mono">--</span></span>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- Main Grid -->
+  <main class="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-grow">
+
+    <!-- Column 1 & 2: Video Stream & PTZ Control (2 cols on large screen) -->
+    <div class="lg:col-span-2 flex flex-col gap-6">
+
+      <!-- Video Feed Card -->
+      <div class="glass-card rounded-2xl p-4 overflow-hidden relative flex flex-col">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2 text-sm font-semibold text-gray-200">
+            <i class="fa-solid fa-video text-cyan-400"></i>
+            Jonli Video Oqimi (Real-Time AI Video)
+          </div>
+          <span id="aiTag" class="text-xs px-2.5 py-1 rounded-full bg-blue-900/60 text-blue-300 border border-blue-500/30">
+            AI Tahlil Faol (HOG & Motion)
+          </span>
+        </div>
+
+        <div class="relative w-full aspect-video bg-black/70 rounded-xl overflow-hidden flex items-center justify-center border border-gray-800 group">
+          <img id="cameraStream" src="/video_feed" alt="Video Stream" class="w-full h-full object-contain">
+          
+          <div class="absolute top-3 left-3 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs font-mono text-emerald-400 flex items-center gap-2 border border-white/10">
+            <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+            LIVE REC
+          </div>
+
+          <div id="alertBanner" class="hidden absolute bottom-3 left-3 right-3 bg-red-600/90 text-white p-3 rounded-xl text-sm font-bold flex items-center justify-between shadow-2xl backdrop-blur-md animate-bounce">
+            <div class="flex items-center gap-2">
+              <i class="fa-solid fa-triangle-exclamation text-lg"></i>
+              <span id="alertBannerText">XAVF: Harakat aniqlandi!</span>
+            </div>
+            <button onclick="triggerSiren(true)" class="bg-white text-red-700 px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-gray-100">
+              Kalonkani Yoqish
+            </button>
+          </div>
+        </div>
+
+        <!-- Avtomatik Stream Manzili va Bog'lanish Tugmasi -->
+        <div class="mt-3 pt-3 border-t border-gray-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-gray-400">Kamera Manzili:</span>
+            <span id="streamIpDisplay" class="font-mono text-cyan-300 font-bold bg-gray-800/90 px-3 py-1.5 rounded-lg border border-gray-700">
+              http://10.24.95.110:81/stream
+            </span>
+            <span class="text-[11px] px-2.5 py-1 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-800 flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Avtomatik aniqlangan
+            </span>
+          </div>
+
+          <button id="connectStreamBtn" onclick="connectCameraStream()" class="bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white px-5 py-2 rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg shadow-cyan-900/30">
+            <i class="fa-solid fa-link"></i>
+            <span id="connectBtnText">Kameraga Bog'lanish</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- PTZ 180° Servo & Alarm Controls -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+        <!-- PTZ Camera Servo (180° Patrullash) -->
+        <div class="glass-card rounded-2xl p-5 flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-semibold text-gray-200 flex items-center gap-2">
+              <i class="fa-solid fa-arrows-left-right text-indigo-400"></i>
+              Kamera Gorizontal Burilishi (GPIO 46)
+            </h3>
+            <div class="flex items-center gap-1.5">
+              <span id="patrolBadge" class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
+                20s Patrul Faol (45°-135°)
+              </span>
+              <span id="angleDisplay" class="px-2.5 py-1 rounded-lg bg-indigo-950 text-indigo-300 font-mono text-xs font-bold border border-indigo-500/30">
+                90°
+              </span>
+            </div>
+          </div>
+
+          <div class="space-y-2 mb-4">
+            <input id="servoSlider" type="range" min="45" max="135" value="90" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" oninput="updateServo(this.value)">
+            <div class="flex justify-between text-[11px] text-gray-400 font-mono">
+              <span>45° (Chap Sektor)</span>
+              <span>90° (Markaz - Default)</span>
+              <span>135° (O'ng Sektor)</span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-4 gap-2">
+            <button onclick="setServoAngle(45)" class="bg-indigo-950/60 hover:bg-indigo-800/60 text-indigo-300 py-1.5 rounded-lg text-xs font-medium border border-indigo-700/50">45°</button>
+            <button onclick="setServoAngle(90)" class="bg-gray-800 hover:bg-gray-700 text-gray-300 py-1.5 rounded-lg text-xs font-medium">90°</button>
+            <button onclick="setServoAngle(135)" class="bg-indigo-950/60 hover:bg-indigo-800/60 text-indigo-300 py-1.5 rounded-lg text-xs font-medium border border-indigo-700/50">135°</button>
+            <button id="sweepBtn" onclick="toggleAutoSweep()" class="bg-cyan-700 hover:bg-cyan-600 text-white py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1 border border-cyan-500/40">
+              <i class="fa-solid fa-rotate"></i> 20s Patrul
+            </button>
+          </div>
+        </div>
+
+        <!-- Animal Scare Siren (Hayvon Qo'rqituvchi Kalonka) Control -->
+        <div class="glass-card rounded-2xl p-5 flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-gray-200 flex items-center gap-2">
+              <i class="fa-solid fa-bullhorn text-amber-400"></i>
+              Hayvonlarni Qo'rqitish Tizimi (Kalonka)
+            </h3>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="autoSirenToggle" class="sr-only peer" checked onchange="toggleAutoSiren(this.checked)">
+              <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600"></div>
+            </label>
+          </div>
+
+          <p class="text-xs text-gray-400 mb-3">
+            1400Hz - 3200Hz yirtqich/tashvish modulyatsiyalangan tovush: yovvoyi hayvonlar, tulkilar va qushlarni qochiradi.
+          </p>
+
+          <div class="flex items-center gap-3">
+            <button id="sirenBtn" onclick="toggleManualSiren()" class="flex-grow py-3 px-4 rounded-xl text-sm font-bold uppercase tracking-wider transition-all duration-300 flex items-center justify-center gap-2 bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white shadow-lg shadow-red-900/30">
+              <i class="fa-solid fa-volume-high"></i>
+              <span id="sirenBtnText">Sirena Yoqish (Manual)</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- Column 3: Sensors, Telemetry & Live GPS Map -->
+    <div class="flex flex-col gap-6">
+
+      <!-- Telemetry Cards -->
+      <div class="glass-card rounded-2xl p-5">
+        <h3 class="text-sm font-semibold text-gray-200 mb-4 flex items-center justify-between">
+          <span class="flex items-center gap-2">
+            <i class="fa-solid fa-chart-pie text-emerald-400"></i>
+            Dala Datchiklari
+          </span>
+          <span class="text-[10px] px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800">
+            HTU21 I2C • ADC2 (IO15)
+          </span>
+        </h3>
+
+        <div class="grid grid-cols-2 gap-3">
+          <!-- Soil Moisture (Analog - GPIO 15) -->
+          <div class="bg-gray-800/60 p-3.5 rounded-xl border border-gray-700/50 flex flex-col justify-between">
+            <span class="text-xs text-gray-400 flex items-center gap-1.5">
+              <i class="fa-solid fa-droplet text-blue-400"></i> Tuproq Namligi
+            </span>
+            <div class="mt-2 flex items-baseline gap-1">
+              <span id="soilVal" class="text-2xl font-bold text-blue-300 font-mono">--</span>
+              <span class="text-xs text-gray-400">%</span>
+            </div>
+            <div class="w-full bg-gray-700 h-1.5 rounded-full mt-2 overflow-hidden">
+              <div id="soilBar" class="bg-blue-500 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
+            </div>
+            <span id="soilRawVal" class="text-[10px] text-gray-400 mt-1 font-mono">Analog ADC (IO15): --</span>
+          </div>
+
+          <!-- Batareya Quvvati (GPIO 3) -->
+          <div class="bg-gray-800/60 p-3.5 rounded-xl border border-gray-700/50 flex flex-col justify-between">
+            <span class="text-xs text-gray-400 flex items-center gap-1.5">
+              <i id="cardBattIcon" class="fa-solid fa-battery-full text-emerald-400"></i> Batareya Quvvati
+            </span>
+            <div class="mt-2 flex items-baseline gap-1">
+              <span id="battVal" class="text-2xl font-bold text-emerald-300 font-mono">--</span>
+              <span class="text-xs text-gray-400">%</span>
+            </div>
+            <div class="w-full bg-gray-700 h-1.5 rounded-full mt-2 overflow-hidden">
+              <div id="battBar" class="bg-emerald-500 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
+            </div>
+            <span id="battVoltVal" class="text-[10px] text-gray-400 mt-1 font-mono">Kuchlanish: -- V</span>
+          </div>
+
+          <!-- HTU21 Havo Harorati -->
+          <div class="bg-gray-800/60 p-3.5 rounded-xl border border-gray-700/50 flex flex-col justify-between">
+            <span class="text-xs text-gray-400 flex items-center gap-1.5">
+              <i class="fa-solid fa-temperature-three-quarters text-orange-400"></i> Havo Harorati
+            </span>
+            <div class="mt-2 flex items-baseline gap-1">
+              <span id="tempVal" class="text-2xl font-bold text-orange-300 font-mono">--</span>
+              <span class="text-xs text-gray-400">°C</span>
+            </div>
+            <span class="text-[10px] text-emerald-400 mt-1 font-mono">HTU21D (I2C)</span>
+          </div>
+
+          <!-- HTU21 Havo Namligi -->
+          <div class="bg-gray-800/60 p-3.5 rounded-xl border border-gray-700/50 flex flex-col justify-between">
+            <span class="text-xs text-gray-400 flex items-center gap-1.5">
+              <i class="fa-solid fa-cloud text-teal-400"></i> Havo Namligi
+            </span>
+            <div class="mt-2 flex items-baseline gap-1">
+              <span id="humVal" class="text-2xl font-bold text-teal-300 font-mono">--</span>
+              <span class="text-xs text-gray-400">%</span>
+            </div>
+            <span class="text-[10px] text-teal-400 mt-1 font-mono">HTU21D (I2C)</span>
+          </div>
+
+          <!-- HLK-LD2410C Radar (GPIO 44/43) -->
+          <div class="col-span-2 bg-gray-800/60 p-3.5 rounded-xl border border-gray-700/50 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl bg-purple-950/80 text-purple-400 flex items-center justify-center border border-purple-500/30 text-lg">
+                <i class="fa-solid fa-radar"></i>
+              </div>
+              <div>
+                <span class="text-xs text-gray-400 block">HLK-LD2410C Radar (IO44/43):</span>
+                <span id="radarStatusText" class="text-sm font-bold text-purple-300">Tinch (Nishon yo'q)</span>
+              </div>
+            </div>
+            <div class="text-right">
+              <span class="text-[10px] text-gray-400 block">Nishon Masofasi:</span>
+              <span id="radarDistText" class="text-sm font-mono font-bold text-cyan-300">-- sm</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- GPS Map Card -->
+      <div class="glass-card rounded-2xl p-5 flex flex-col flex-grow min-h-[240px]">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-gray-200 flex items-center gap-2">
+            <i class="fa-solid fa-location-dot text-rose-500"></i>
+            Ferma Koordinatalari (GPS - IO40/41)
+          </h3>
+          <span id="gpsCoords" class="text-[11px] font-mono text-gray-400">41.5505, 60.6312</span>
+        </div>
+        <div id="map" class="w-full h-40 rounded-xl overflow-hidden border border-gray-700 z-0"></div>
+      </div>
+
+      <!-- Alert & Activity Log -->
+      <div class="glass-card rounded-2xl p-4 flex flex-col max-h-48 overflow-hidden">
+        <div class="flex items-center justify-between mb-2">
+          <h4 class="text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+            <i class="fa-solid fa-list-check text-cyan-400"></i> Xavfsizlik Jurnali
+          </h4>
+          <span class="text-[10px] text-gray-500 font-mono">Real-time</span>
+        </div>
+        <div id="logList" class="space-y-1.5 overflow-y-auto text-xs text-gray-300 flex-grow pr-1 font-mono">
+          <div class="p-1.5 rounded bg-gray-800/40 border border-gray-700/30 flex justify-between">
+            <span>Tizim yangilandi (20s Servo + Hayvon Qo'rqitgich + Auto IP).</span>
+            <span class="text-gray-500">Hozir</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <script>
+    let sirenActive = false;
+    let autoPatrol = true;
+    let currentAngle = 90;
+    let endpointIp = "10.24.95.110";
+
+    let lastGatewayTimestamp = 0;
+    let lastEndpointTimestamp = 0;
+
+    // Initialize Leaflet Map
+    const map = L.map('map').setView([41.55, 60.63], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+    let marker = L.marker([41.55, 60.63]).addTo(map).bindPopup('Ferma Tuguni (Endpoint)').openPopup();
+
+    // WebSocket for live updates
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+    ws.onmessage = function(event) {
+      const data = JSON.parse(event.data);
+      updateDashboard(data);
+    };
+
+    function updateDashboard(data) {
+      // 1. Gateway Status
+      if (data.gateway) {
+        const g = data.gateway;
+        const gCard = document.getElementById('gatewayCard');
+        const gBadge = document.getElementById('gatewayBadge');
+        const gText = document.getElementById('gatewayStatusText');
+
+        if (g.online) {
+          gBadge.className = "px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 bg-emerald-950 text-emerald-400 border border-emerald-500 neon-green";
+          gText.innerText = "ONLINE";
+          gCard.classList.add('border-emerald-500/40');
+          gCard.classList.remove('border-red-500/40');
+        } else {
+          gBadge.className = "px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 bg-red-950 text-red-400 border border-red-800";
+          gText.innerText = "OFFLINE";
+          gCard.classList.add('border-red-500/40');
+          gCard.classList.remove('border-emerald-500/40');
+        }
+
+        if (g.ip && g.ip !== "Ulanmagan") {
+          document.getElementById('gatewayIp').innerText = g.ip;
+        }
+        if (g.rssi) document.getElementById('gatewayRssi').innerText = `${g.rssi} dBm`;
+        if (g.packets !== undefined) document.getElementById('gatewayPackets').innerText = g.packets;
+        if (g.last_seen) lastGatewayTimestamp = g.last_seen;
+      }
+
+      // 2. Endpoint Status
+      if (data.endpoint) {
+        const ep = data.endpoint;
+        const epCard = document.getElementById('endpointCard');
+        const epBadge = document.getElementById('endpointBadge');
+        const epText = document.getElementById('endpointStatusText');
+
+        if (ep.online) {
+          epBadge.className = "px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 bg-emerald-950 text-emerald-400 border border-emerald-500 neon-green";
+          epText.innerText = "ONLINE";
+          epCard.classList.add('border-emerald-500/40');
+          epCard.classList.remove('border-red-500/40');
+        } else {
+          epBadge.className = "px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 bg-red-950 text-red-400 border border-red-800";
+          epText.innerText = "OFFLINE";
+          epCard.classList.add('border-red-500/40');
+          epCard.classList.remove('border-emerald-500/40');
+        }
+
+        if (ep.ip && ep.ip !== "Ulanmagan") {
+          endpointIp = ep.ip;
+          document.getElementById('endpointIp').innerText = ep.ip;
+          document.getElementById('streamIpDisplay').innerText = `http://${ep.ip}:81/stream`;
+        }
+        if (ep.last_seen) lastEndpointTimestamp = ep.last_seen;
+      }
+
+      // 3. Telemetry
+      if (data.telemetry) {
+        const t = data.telemetry;
+
+        // Soil
+        if (t.soil !== undefined) {
+          document.getElementById('soilVal').innerText = t.soil;
+          document.getElementById('soilBar').style.width = `${Math.min(100, Math.max(0, t.soil))}%`;
+        }
+        if (t.soil_raw !== undefined) {
+          document.getElementById('soilRawVal').innerText = `Analog ADC (IO15): ${t.soil_raw}`;
+        }
+
+        // Battery
+        if (t.battery !== undefined) {
+          const b = Math.min(100, Math.max(0, Math.round(t.battery)));
+          const v = t.battery_voltage ? parseFloat(t.battery_voltage).toFixed(2) : '4.20';
+          document.getElementById('battVal').innerText = b;
+          document.getElementById('battBar').style.width = `${b}%`;
+          document.getElementById('battVoltVal').innerText = `Kuchlanish: ${v} V`;
+          document.getElementById('topBattText').innerText = `${b}% (${v}V)`;
+          document.getElementById('endpointBatt').innerText = `${b}% (${v}V)`;
+
+          const battIcon = document.getElementById('cardBattIcon');
+          const topIcon = document.getElementById('topBattIcon');
+          const bar = document.getElementById('battBar');
+          if (b > 60) {
+            battIcon.className = "fa-solid fa-battery-full text-emerald-400";
+            topIcon.className = "fa-solid fa-battery-full text-emerald-400";
+            bar.className = "bg-emerald-500 h-full rounded-full transition-all duration-500";
+          } else if (b > 20) {
+            battIcon.className = "fa-solid fa-battery-half text-amber-400";
+            topIcon.className = "fa-solid fa-battery-half text-amber-400";
+            bar.className = "bg-amber-500 h-full rounded-full transition-all duration-500";
+          } else {
+            battIcon.className = "fa-solid fa-battery-quarter text-red-400 animate-pulse";
+            topIcon.className = "fa-solid fa-battery-quarter text-red-400 animate-pulse";
+            bar.className = "bg-red-500 h-full rounded-full transition-all duration-500";
+          }
+        }
+
+        // HTU21 Temperature & Humidity
+        if (t.temperature !== undefined) document.getElementById('tempVal').innerText = t.temperature;
+        if (t.humidity !== undefined) document.getElementById('humVal').innerText = t.humidity;
+
+        // Radar HLK-LD2410C
+        if (t.radar !== undefined) {
+          const rText = document.getElementById('radarStatusText');
+          if (t.radar === 1) {
+            rText.innerText = "Harakatlanuvchi nishon!";
+            rText.className = "text-sm font-bold text-amber-400 animate-pulse";
+          } else if (t.radar === 2) {
+            rText.innerText = "Qo'zg'almas nishon bor";
+            rText.className = "text-sm font-bold text-indigo-400";
+          } else if (t.radar === 3) {
+            rText.innerText = "Harakat va mavjudlik aniqlandi!";
+            rText.className = "text-sm font-bold text-rose-400 animate-pulse";
+          } else {
+            rText.innerText = "Tinch (Nishon yo'q)";
+            rText.className = "text-sm font-bold text-purple-300";
+          }
+        }
+        if (t.radar_distance !== undefined) {
+          document.getElementById('radarDistText').innerText = t.radar_distance > 0 ? `${t.radar_distance} sm` : '--';
+        }
+
+        // GPS
+        if (t.lat && t.lng) {
+          const lat = parseFloat(t.lat);
+          const lng = parseFloat(t.lng);
+          if (!isNaN(lat) && !isNaN(lng) && lat !== 0) {
+            document.getElementById('gpsCoords').innerText = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+            marker.setLatLng([lat, lng]);
+            map.panTo([lat, lng]);
+          }
+        }
+      }
+
+      // 4. Servo Angle Sync
+      if (data.servo_angle !== undefined) {
+        currentAngle = data.servo_angle;
+        document.getElementById('servoSlider').value = currentAngle;
+        document.getElementById('angleDisplay').innerText = `${currentAngle}°`;
+      }
+
+      // 5. Siren State Sync
+      if (data.siren_active !== undefined) {
+        updateSirenUI(data.siren_active);
+      }
+
+      // 6. AI Alert State
+      if (data.ai_alert !== undefined) {
+        const badge = document.getElementById('statusBadge');
+        const text = document.getElementById('statusText');
+        const banner = document.getElementById('alertBanner');
+        const bannerText = document.getElementById('alertBannerText');
+
+        if (data.ai_alert) {
+          badge.className = "px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 bg-red-950/80 text-red-300 border border-red-500/50 neon-red";
+          text.innerText = "OGOHLANTIRISH: Xavf!";
+          banner.classList.remove('hidden');
+          bannerText.innerText = data.ai_message || "Harakat / Begona obyekt aniqlandi!";
+        } else {
+          badge.className = "px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 bg-emerald-950/60 text-emerald-400 border border-emerald-500/30";
+          text.innerText = "Xavfsizlik: Tinch";
+          banner.classList.add('hidden');
+        }
+      }
+
+      if (data.log) {
+        addLog(data.log);
+      }
+    }
+
+    // Dynamic "sek oldin" ticker
+    setInterval(() => {
+      const now = Date.now() / 1000;
+      if (lastGatewayTimestamp > 0) {
+        const diff = Math.floor(now - lastGatewayTimestamp);
+        document.getElementById('gatewayLastSeen').innerText = diff < 4 ? 'Ayni damda' : `${diff} sek oldin`;
+      }
+      if (lastEndpointTimestamp > 0) {
+        const diff = Math.floor(now - lastEndpointTimestamp);
+        document.getElementById('endpointLastSeen').innerText = diff < 4 ? 'Ayni damda' : `${diff} sek oldin`;
+      }
+    }, 1000);
+
+    function addLog(msg) {
+      const list = document.getElementById('logList');
+      const item = document.createElement('div');
+      item.className = "p-1.5 rounded bg-gray-800/60 border border-gray-700/40 flex justify-between";
+      item.innerHTML = `<span>${msg}</span><span class="text-gray-500">${new Date().toLocaleTimeString()}</span>`;
+      list.prepend(item);
+      if (list.children.length > 20) list.removeChild(list.lastChild);
+    }
+
+    // Kameraga Bir Bosishda Bog'lanish Funksiyasi
+    function connectCameraStream() {
+      const btn = document.getElementById('connectStreamBtn');
+      const text = document.getElementById('connectBtnText');
+      text.innerText = "Bog'lanmoqda...";
+      btn.classList.add('opacity-80');
+
+      fetch('/api/connect_camera', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+          text.innerText = "Ulandi!";
+          btn.classList.remove('opacity-80');
+          setTimeout(() => {
+            text.innerText = "Kameraga Bog'lanish";
+          }, 2500);
+          const img = document.getElementById('cameraStream');
+          img.src = '/video_feed?t=' + Date.now();
+          addLog(`Kamera oqimi ulandi: ${data.camera_url}`);
+        })
+        .catch(err => {
+          text.innerText = "Qayta urinish";
+          btn.classList.remove('opacity-80');
+          addLog("Kameraga ulanishda xatolik yuz berdi.");
+        });
+    }
+
+    // Servo Controls
+    function updateServo(val) {
+      currentAngle = parseInt(val);
+      document.getElementById('angleDisplay').innerText = `${currentAngle}°`;
+      document.getElementById('patrolBadge').innerText = "Qo'lda O'rnatilgan";
+      document.getElementById('patrolBadge').className = "px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-300 border border-amber-800";
+      fetch('/api/servo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ angle: currentAngle })
+      });
+    }
+
+    function setServoAngle(val) {
+      document.getElementById('servoSlider').value = val;
+      updateServo(val);
+    }
+
+    function toggleAutoSweep() {
+      autoPatrol = !autoPatrol;
+      const btn = document.getElementById('sweepBtn');
+      const badge = document.getElementById('patrolBadge');
+      if (autoPatrol) {
+        btn.className = "bg-cyan-700 hover:bg-cyan-600 text-white py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1 border border-cyan-500/40";
+        badge.innerText = "20s Patrul Faol (45°-135°)";
+        badge.className = "px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800";
+        fetch(`http://${endpointIp}/servo?auto=1`).catch(() => {});
+        addLog("Avtomatik 20s patrul (45°-135°) faollashtirildi.");
+      } else {
+        btn.className = "bg-gray-800 hover:bg-gray-700 text-gray-300 py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1";
+        badge.innerText = "Patrul To'xtatildi";
+        badge.className = "px-2 py-0.5 rounded text-[10px] font-bold bg-gray-800 text-gray-400 border border-gray-700";
+        fetch(`http://${endpointIp}/servo?auto=0`).catch(() => {});
+        addLog("Avtomatik patrul to'xtatildi.");
+      }
+    }
+
+    // Siren Controls (Hayvon Qo'rqitgich)
+    function triggerSiren(state) {
+      fetch('/api/siren', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: state })
+      })
+      .then(r => r.json())
+      .then(data => {
+        updateSirenUI(data.siren_active);
+      })
+      .catch(err => {
+        console.error("Sirena xatoligi:", err);
+      });
+    }
+
+    function toggleManualSiren() {
+      triggerSiren(!sirenActive);
+    }
+
+    function updateSirenUI(active) {
+      sirenActive = active;
+      const btn = document.getElementById('sirenBtn');
+      const btnText = document.getElementById('sirenBtnText');
+      if (sirenActive) {
+        btn.className = "flex-grow py-3 px-4 rounded-xl text-sm font-bold uppercase tracking-wider transition-all duration-300 flex items-center justify-center gap-2 bg-red-600 text-white shadow-lg shadow-red-600/50 animate-pulse";
+        btnText.innerText = "SIRENA YOQILGAN! (O'chirish)";
+      } else {
+        btn.className = "flex-grow py-3 px-4 rounded-xl text-sm font-bold uppercase tracking-wider transition-all duration-300 flex items-center justify-center gap-2 bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white shadow-lg shadow-red-900/30";
+        btnText.innerText = "Sirena Yoqish (Manual)";
+      }
+    }
+
+    function toggleAutoSiren(enabled) {
+      fetch('/api/auto_siren', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: enabled })
+      });
+    }
+  </script>
+</body>
+</html>
