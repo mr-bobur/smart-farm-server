@@ -89,5 +89,24 @@ sudo systemctl status smartfarm
 
 ---
 
+## 🔌 Mikrokontroller Proshivkalari (Firmware)
+
+Ushbu repozitoriyaning `firmware/` papkasida **LilyGO T-Halow (ESP32-S3)** platalari uchun to'liq Arduino proshivkalari joylashgan:
+
+* **`firmware/SmartFarm_Endpoint/SmartFarm_Endpoint.ino`** — Dala (Endpoint) tuguni:
+  - OV2640 kamerasi (180° sozlangan, `/stream` port 81).
+  - 45°-135° burchak ostida 20 soniyalik uzluksiz patrul aylanishiga ega Servo (LEDC Channel 0, 50Hz).
+  - Yirtqich hayvonlarni qo'rqituvchi akustik sirena (LEDC Channel 2, 1400Hz-3200Hz sweep). Sirena chalayotganda servo avtomatik to'xtatiladi.
+  - HLK-LD2410C 24GHz Millimetr-to'lqinli inson/harakat radari (RX: 44, TX: 43, OUT: GPIO 39).
+  - HTU21 datchigi (havo harorati va namligi) va tuproq namligi sensori (GPIO 15).
+  - AT6558 GPS moduli (RX: 40, TX: 41) va LiPo batareya monitoringi (GPIO 3).
+
+* **`firmware/SmartFarm_Gateway/SmartFarm_Gateway.ino`** — Qabul qiluvchi Gateway tuguni:
+  - Wi-Fi Hotspot ("Ferma") ga ulanish.
+  - Video oqimi uchun Reverse Proxy (`/stream`).
+  - Har 5 soniyada serverga Heartbeat va telemetriya uzatish.
+
+---
+
 ## 🛡️ Muallif
 - **Bobur Abdugafforov** ([@mr-bobur](https://github.com/mr-bobur))
