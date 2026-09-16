@@ -1,0 +1,25 @@
+{
+  "name": "smart-farm-server",
+  "version": "1.0.0",
+  "description": "Aqlli va Xavfsiz Ferma - Node.js AI Backend & IoT Web Dashboard",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "iot",
+    "smart-farm",
+    "esp32",
+    "wifi-halow",
+    "camera-stream",
+    "ai-motion-detection"
+  ],
+  "author": "mr-bobur",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^5.2.1",
+    "jpeg-js": "^0.4.4",
+    "ws": "^8.21.3"
+  }
+}
