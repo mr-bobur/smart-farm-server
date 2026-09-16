@@ -26,8 +26,8 @@
 const char* wifi_ssid     = "Ferma";
 const char* wifi_password = "12345678";
 
-// 2. Markaziy Server (Kompyuter) Sozlamalari (Ferma tarmog'idagi IP)
-const char* server_host   = "10.24.95.226";
+// 2. Markaziy Server (Kompyuter) Sozlamalari (Real tashqi server IP)
+const char* server_host   = "170.168.60.245";
 const int   server_port   = 8000;
 
 // 3. Dala Tuguni (Endpoint) HaLow IP va Portlari

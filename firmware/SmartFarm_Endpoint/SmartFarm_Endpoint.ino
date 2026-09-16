@@ -90,12 +90,13 @@
 WiFiMulti wifiMulti;
 
 const char* server_urls[] = {
-  "http://10.24.95.226:8000/api/telemetry",   // Asosiy server IP
+  "http://170.168.60.245:8000/api/telemetry", // Real tashqi server IP
+  "http://10.24.95.226:8000/api/telemetry",   // Asosiy lokal server IP
   "http://192.168.88.109:8000/api/telemetry",  // Zaxira IT-Park
   "http://10.242.63.226:8000/api/telemetry",   // Zaxira Ferma Hotspot
   "http://192.168.88.108:8000/api/telemetry"
 };
-const int num_server_urls = 4;
+const int num_server_urls = 5;
 int activeServerIdx = 0;
 
 httpd_handle_t camera_httpd = NULL;
