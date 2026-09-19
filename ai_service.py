@@ -72,14 +72,22 @@ class SmartFarmAIDetector:
             self.bg_subtractor.apply(frame, learningRate=0.2)
             status_color = (180, 130, 0) # Ko'k-sariq
             status_text = f"[KAMERA BURILMOQDA] Patrul tahlili pauzada ({pan_shift:.1f}px)"
-            cv2.rectangle(display_frame, (0, 0), (w, 22), status_color, -1)
-            cv2.putText(display_frame, status_text, (6, 16), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
+            out_w = w
+            if w < 640:
+                display_frame = cv2.resize(display_frame, (640, 480), interpolation=cv2.INTER_LANCZOS4)
+                out_w = 640
+
+            banner_h = 26 if out_w >= 640 else 22
+            font_scale = 0.52 if out_w >= 640 else 0.42
+            cv2.rectangle(display_frame, (0, 0), (out_w, banner_h), status_color, -1)
+            cv2.putText(display_frame, status_text, (8, 18 if out_w >= 640 else 16),
+                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), 1, cv2.LINE_AA)
 
             # Kamera harakatlanayotganda hayvon taymerini to'xtatish
             self.motion_start_time = 0.0
             self.motion_duration = 0.0
 
-            ret, out_jpeg = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 78])
+            ret, out_jpeg = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
             if ret:
                 return out_jpeg.tobytes(), False, "Kamera burilmoqda...", [], self.siren_active
             return jpeg_bytes, False, "Kamera burilmoqda...", [], self.siren_active
@@ -203,13 +211,23 @@ class SmartFarmAIDetector:
                 status_color = (0, 140, 0) # Yashil
                 status_text = f"[AI TINCH] Xavfsiz | {time.strftime('%H:%M:%S')}"
 
-        # 6. Kadr tepasiga AI holat sarlavhasi (Banner) chizish
-        cv2.rectangle(display_frame, (0, 0), (w, 22), status_color, -1)
-        cv2.putText(display_frame, status_text, (6, 16),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
+        # 6. Yuqori aniqlikdagi HD (640x480) tasvirga o'tkazish va tiniqlashtirish (Super-Sampling)
+        out_w, out_h = w, h
+        if w < 640:
+            display_frame = cv2.resize(display_frame, (640, 480), interpolation=cv2.INTER_LANCZOS4)
+            gaussian = cv2.GaussianBlur(display_frame, (0, 0), 1.8)
+            display_frame = cv2.addWeighted(display_frame, 1.25, gaussian, -0.25, 0)
+            out_w, out_h = 640, 480
 
-        # 7. Annotated kadrni JPEG ga kodlash (Maksimal tiniq sifat: Q85)
-        ret, out_jpeg = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        # 7. Kadr tepasiga AI holat sarlavhasi (Banner) chizish
+        banner_h = 26 if out_w >= 640 else 22
+        font_scale = 0.52 if out_w >= 640 else 0.42
+        cv2.rectangle(display_frame, (0, 0), (out_w, banner_h), status_color, -1)
+        cv2.putText(display_frame, status_text, (8, 18 if out_w >= 640 else 16),
+                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), 1, cv2.LINE_AA)
+
+        # 8. Annotated kadrni JPEG ga kodlash (Maksimal tiniq sifat: Q90)
+        ret, out_jpeg = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
         if ret:
             return out_jpeg.tobytes(), self.alert_active, self.alert_message, self.detected_objects, self.siren_active
         return jpeg_bytes, self.alert_active, self.alert_message, self.detected_objects, self.siren_active
