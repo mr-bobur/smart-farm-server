@@ -171,18 +171,18 @@
         <!-- Avtomatik Stream Manzili va Bog'lanish Tugmasi -->
         <div class="mt-3 pt-3 border-t border-gray-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
           <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-gray-400">Kamera Manzili:</span>
+            <span class="text-gray-400">Video Manzili:</span>
             <span id="streamIpDisplay" class="font-mono text-cyan-300 font-bold bg-gray-800/90 px-3 py-1.5 rounded-lg border border-gray-700">
-              http://10.24.95.110:81/stream
+              /video_feed (Real-Time Push)
             </span>
             <span class="text-[11px] px-2.5 py-1 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-800 flex items-center gap-1.5">
-              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Avtomatik aniqlangan
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Jonli Oqim Faol
             </span>
           </div>
 
           <button id="connectStreamBtn" onclick="connectCameraStream()" class="bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white px-5 py-2 rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg shadow-cyan-900/30">
-            <i class="fa-solid fa-link"></i>
-            <span id="connectBtnText">Kameraga Bog'lanish</span>
+            <i class="fa-solid fa-arrows-rotate"></i>
+            <span id="connectBtnText">Oqimni Yangilash</span>
           </button>
         </div>
       </div>
@@ -592,30 +592,32 @@
       if (list.children.length > 20) list.removeChild(list.lastChild);
     }
 
-    // Kameraga Bir Bosishda Bog'lanish Funksiyasi
+    // Video Oqimini Nazorat Qilish va Avto-Qayta Ulanish
+    const cameraImg = document.getElementById('cameraStream');
+    cameraImg.onerror = function() {
+      console.warn("Video oqimida uzilish aniqlandi, 1 soniyadan so'ng qayta ulanmoqda...");
+      setTimeout(() => {
+        cameraImg.src = '/video_feed?t=' + Date.now();
+      }, 1000);
+    };
+
     function connectCameraStream() {
       const btn = document.getElementById('connectStreamBtn');
       const text = document.getElementById('connectBtnText');
-      text.innerText = "Bog'lanmoqda...";
+      text.innerText = "Yangilanmoqda...";
       btn.classList.add('opacity-80');
 
-      fetch('/api/connect_camera', { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-          text.innerText = "Ulandi!";
-          btn.classList.remove('opacity-80');
-          setTimeout(() => {
-            text.innerText = "Kameraga Bog'lanish";
-          }, 2500);
-          const img = document.getElementById('cameraStream');
-          img.src = '/video_feed?t=' + Date.now();
-          addLog(`Kamera oqimi ulandi: ${data.camera_url}`);
-        })
-        .catch(err => {
-          text.innerText = "Qayta urinish";
-          btn.classList.remove('opacity-80');
-          addLog("Kameraga ulanishda xatolik yuz berdi.");
-        });
+      cameraImg.src = '/video_feed?t=' + Date.now();
+      setTimeout(() => {
+        text.innerText = "Oqim Yangilandi!";
+        btn.classList.remove('opacity-80');
+        setTimeout(() => {
+          text.innerText = "Oqimni Yangilash";
+        }, 1800);
+      }, 500);
+
+      fetch('/api/connect_camera', { method: 'POST' }).catch(() => {});
+      addLog("Video oqimi brauzerda qayta yuklandi.");
     }
 
     // Servo Controls

@@ -283,7 +283,11 @@ class SmartFarmDetector {
 
     for (const res of this.activeFeedClients) {
       try {
-        res.write(chunk);
+        if (!res.writableEnded && !res.destroyed) {
+          res.write(chunk);
+        } else {
+          this.activeFeedClients.delete(res);
+        }
       } catch (e) {
         this.activeFeedClients.delete(res);
       }
@@ -293,9 +297,10 @@ class SmartFarmDetector {
   handleFeedRequest(req, res) {
     res.writeHead(200, {
       'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Connection': 'close',
-      'Pragma': 'no-cache'
+      'Cache-Control': 'no-cache, no-store, must-revalidate, pre-check=0, post-check=0, max-age=0',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      'Connection': 'keep-alive'
     });
 
     this.activeFeedClients.add(res);
@@ -303,12 +308,22 @@ class SmartFarmDetector {
     // Ulanishi bilan oxirgi kadrni darhol jo'natish
     if (this.lastFrameBuffer) {
       const header = `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${this.lastFrameBuffer.length}\r\n\r\n`;
-      res.write(Buffer.concat([Buffer.from(header), this.lastFrameBuffer, Buffer.from('\r\n')]));
+      try {
+        res.write(Buffer.concat([Buffer.from(header), this.lastFrameBuffer, Buffer.from('\r\n')]));
+      } catch (e) {
+        this.activeFeedClients.delete(res);
+        return;
+      }
     }
 
-    req.on('close', () => {
+    const cleanup = () => {
       this.activeFeedClients.delete(res);
-    });
+    };
+
+    req.on('close', cleanup);
+    res.on('close', cleanup);
+    res.on('finish', cleanup);
+    res.on('error', cleanup);
   }
 
   _generatePlaceholderFrame() {

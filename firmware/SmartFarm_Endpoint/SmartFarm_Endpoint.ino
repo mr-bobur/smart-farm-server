@@ -90,21 +90,13 @@
 WiFiMulti wifiMulti;
 
 const char* server_urls[] = {
-  "http://170.168.60.245:8000/api/telemetry", // Real tashqi server IP
-  "http://10.24.95.226:8000/api/telemetry",   // Asosiy lokal server IP
-  "http://192.168.88.109:8000/api/telemetry",  // Zaxira IT-Park
-  "http://10.242.63.226:8000/api/telemetry",   // Zaxira Ferma Hotspot
-  "http://192.168.88.108:8000/api/telemetry"
+  "http://170.168.60.245:8000/api/telemetry" // Yagona faol tashqi server
 };
 
 const char* upload_frame_urls[] = {
-  "http://170.168.60.245:8000/api/upload_frame", // Real tashqi server IP
-  "http://10.24.95.226:8000/api/upload_frame",   // Asosiy lokal server IP
-  "http://192.168.88.109:8000/api/upload_frame",  // Zaxira IT-Park
-  "http://10.242.63.226:8000/api/upload_frame",   // Zaxira Ferma Hotspot
-  "http://192.168.88.108:8000/api/upload_frame"
+  "http://170.168.60.245:8000/api/upload_frame" // Yagona faol video upload
 };
-const int num_server_urls = 5;
+const int num_server_urls = 1;
 int activeServerIdx = 0;
 
 TaskHandle_t streamTaskHandle = NULL;
@@ -633,16 +625,14 @@ void streamUploadTask(void *pvParameters) {
   Serial.println("[TASK] Tezkor Video Stream Push vazifasi Core 0 da faollashdi.");
   vTaskDelay(pdMS_TO_TICKS(1500)); // Wi-Fi ulanishini kutish
 
-  HTTPClient http;
-  http.setReuse(true); // TCP keep-alive: ulanishni saqlab qolish orqali tezlikni 3x-4x oshirish
-
   while (true) {
     if (WiFi.status() == WL_CONNECTED && cameraFound) {
       camera_fb_t *fb = esp_camera_fb_get();
       if (fb) {
-        http.begin(upload_frame_urls[activeServerIdx]);
+        HTTPClient http;
+        http.begin(upload_frame_urls[0]);
         http.addHeader("Content-Type", "image/jpeg");
-        http.setTimeout(800);
+        http.setTimeout(1200);
         int code = http.POST(fb->buf, fb->len);
         lastUploadHttpCode = code;
 
@@ -651,14 +641,12 @@ void streamUploadTask(void *pvParameters) {
           String resp = http.getString();
           if (resp.indexOf("\"siren_active\":true") >= 0) setSiren(true);
           else if (resp.indexOf("\"siren_active\":false") >= 0) setSiren(false);
-        } else {
-          // Xatolik bo'lsa ulanishni qayta yangilash
-          http.end();
         }
+        http.end(); // To'liq tozalash va sarlavhalar toshishini bartaraf qilish
         esp_camera_fb_return(fb);
       }
     }
-    vTaskDelay(pdMS_TO_TICKS(40)); // ~12-15 FPS yuqori tezlik
+    vTaskDelay(pdMS_TO_TICKS(40)); // ~12-15 FPS uzluksiz video
   }
 }
 

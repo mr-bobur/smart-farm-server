@@ -167,13 +167,8 @@ app.post('/api/telemetry', (req, res) => {
     systemState.endpoint.ip = data.endpoint_ip;
     systemState.telemetry.endpoint_ip = data.endpoint_ip;
 
-    // Agar kamera o'zi kadr push qilib turgan bo'lsa, pull urinishlarini to'xtatish
-    const isPushing = (detector.lastFrameTime > 0 && (Date.now() - detector.lastFrameTime < 20000));
-    const streamUrl = `http://${data.endpoint_ip}:81/stream`;
-    if (!isPushing && (!detector.cameraUrl || detector.cameraUrl !== streamUrl)) {
-      detector.startStream(streamUrl);
-      systemState.endpoint.camera_online = true;
-    }
+    const isPushing = (detector.lastFrameTime > 0 && (Date.now() - detector.lastFrameTime < 10000));
+    systemState.endpoint.camera_online = isPushing;
   }
 
   // Agar Gateway orqali kelgan bo'lsa
@@ -274,18 +269,15 @@ app.post('/api/auto_siren', (req, res) => {
 
 // To'g'ridan-to'g'ri Kameraga Bog'lanish
 app.post('/api/connect_camera', (req, res) => {
-  const endpointIp = systemState.endpoint.ip || "10.24.95.110";
-  const streamUrl = `http://${endpointIp}:81/stream`;
-
-  detector.startStream(streamUrl);
-  systemState.endpoint.camera_online = true;
+  const isPushing = (detector.lastFrameTime > 0 && (Date.now() - detector.lastFrameTime < 10000));
+  systemState.endpoint.camera_online = isPushing;
 
   broadcastWs({
-    log: `Kameraga ulanish yo'lga qo'yildi: ${streamUrl}`,
+    log: `Kamera oqimi yangilandi (/video_feed)`,
     endpoint: systemState.endpoint
   });
 
-  res.json({ status: "ok", camera_url: streamUrl });
+  res.json({ status: "ok", camera_url: "/video_feed" });
 });
 
 app.post('/api/set_camera_url', (req, res) => {
