@@ -231,12 +231,12 @@ class SmartFarmDetector {
               alertMessage: msg,
               detectedObjects: objects,
               motionDuration: duration,
-              sirenTrigger: isSiren
+              sirenActive: isSiren
             });
           }
 
-          if (isSiren && this.autoSiren && this.sirenCallback) {
-            this.sirenCallback(true);
+          if (this.autoSiren && this.sirenCallback) {
+            this.sirenCallback(isSiren);
           }
         } else {
           this.lastFrameBuffer = frameBuffer;

@@ -63,16 +63,19 @@ function broadcastWs(message) {
 
 // AI Detector tomonidan aniqlangan xavf sirenasi
 detector.sirenCallback = async (active) => {
-  systemState.siren_active = active;
-  systemState.ai_alert = active;
-  const msg = `AI SIRENA: ${active ? 'YOQILDI' : 'O`CHIRILDI'}`;
-  
-  broadcastWs({
-    ai_alert: active,
-    ai_message: detector.alertMessage,
-    log: msg,
-    siren_active: active
-  });
+  if (systemState.siren_active !== active) {
+    systemState.siren_active = active;
+    systemState.ai_alert = active;
+    const msg = `AI SIRENA: ${active ? 'YOQILDI' : 'O`CHIRILDI (Hayvon ketdi, 5s o`tdi)'}`;
+    console.log(`[AI SIRENA] ${msg}`);
+    
+    broadcastWs({
+      ai_alert: active,
+      ai_message: detector.alertMessage,
+      log: msg,
+      siren_active: active
+    });
+  }
 };
 
 // AI Holati va Tahlilini real vaqtda Dashboardga uzatish
@@ -88,7 +91,8 @@ detector.onStatusChange = (status) => {
       ai_alert: status.alertActive,
       ai_message: status.alertMessage,
       detected_objects: status.detectedObjects,
-      motion_duration: status.motionDuration
+      motion_duration: status.motionDuration,
+      siren_active: systemState.siren_active
     });
   }
 };

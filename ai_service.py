@@ -18,16 +18,18 @@ class SmartFarmAIDetector:
         
         # Holatlar
         self.alert_active = False
+        self.siren_active = False
         self.alert_message = "Tizim Tinch (Xavfsiz)"
         self.detected_objects = []
         self.auto_siren = True
         self.last_alert_time = 0
         
-        # 3.0 soniyalik harakat tasdiqlash filtri
+        # 3.0 soniyalik harakat tasdiqlash va 5.0 soniyalik sirena cooldown filtri
         self.motion_start_time = 0.0
         self.motion_last_seen = 0.0
         self.motion_duration = 0.0
         self.CONFIRM_THRESHOLD_SEC = 3.0 # 3.0 soniya uzluksiz harakatda xavf tasdiqlanadi
+        self.SIREN_COOLDOWN_SEC = 5.0 # Hayvon ketgandan so'ng 5.0 soniya o'tib sirena o'chadi
 
     def process_frame(self, jpeg_bytes):
         # 1. JPEG ni dekodlash
@@ -94,49 +96,65 @@ class SmartFarmAIDetector:
             raw_motion = False
             detected = []
 
-        # 4. --- 3.0 SONIYALIK DAVOMIYLIK VA TASDIQLASH FILTRI ---
+        # 4. --- HARAKAT TAHLILI, TASDIQLASH VA SIRENA 5s TA'XIR (COOLDOWN) FILTRI ---
         if raw_motion:
             self.motion_last_seen = now
             if self.motion_start_time == 0.0:
                 self.motion_start_time = now
             self.motion_duration = now - self.motion_start_time
+            self.detected_objects = list(set(detected))
+
+            if self.motion_duration >= self.CONFIRM_THRESHOLD_SEC:
+                self.siren_active = True
+                self.alert_active = True
+                det_str = ", ".join(self.detected_objects) if self.detected_objects else "Harakat / Hayvon"
+                self.alert_message = f"XAVF TASDIQLANDI ({self.motion_duration:.1f}s): {det_str}!"
+                status_color = (0, 0, 200) # Qizil
+                status_text = f"[AI XAVF] TASDIQLANDI ({self.motion_duration:.1f}s) | SIRENA FAOL!"
+            elif self.motion_duration > 0.6:
+                det_str = ", ".join(self.detected_objects) if self.detected_objects else "Obyekt"
+                self.alert_message = f"Harakat tekshirilmoqda... ({self.motion_duration:.1f}s / {self.CONFIRM_THRESHOLD_SEC:.1f}s) [{det_str}]"
+                status_color = (0, 130, 240) # To'q sariq
+                status_text = f"[AI TAHLIL] {self.motion_duration:.1f}s / {self.CONFIRM_THRESHOLD_SEC:.1f}s | {', '.join(detected) if detected else 'Harakat'}"
+            else:
+                self.alert_message = "Tizim Tinch (Xavfsiz)"
+                status_color = (0, 140, 0) # Yashil
+                status_text = f"[AI TINCH] Xavfsiz | {time.strftime('%H:%M:%S')}"
         else:
-            # 1.2 soniya harakat ko'rinmasa taymer qayta tiklanadi
-            if now - self.motion_last_seen > 1.2:
-                self.motion_start_time = 0.0
-                self.motion_duration = 0.0
+            # Kadrda harakat yo'q (Hayvon chiqib ketdi yoki maydon tinch)
+            time_since_motion = now - self.motion_last_seen if self.motion_last_seen > 0 else 999.0
 
-        is_confirmed_alert = (self.motion_duration >= self.CONFIRM_THRESHOLD_SEC)
-        siren_trigger = False
-
-        self.alert_active = is_confirmed_alert
-        self.detected_objects = list(set(detected))
-
-        if is_confirmed_alert:
-            det_str = ", ".join(self.detected_objects) if self.detected_objects else "Harakat / Hayvon"
-            self.alert_message = f"XAVF TASDIQLANDI ({self.motion_duration:.1f}s): {det_str}!"
-
-            # Avtomatik sirena signali (har 6 soniyada bir marta)
-            if self.auto_siren and (now - self.last_alert_time > 6.0):
-                self.last_alert_time = now
-                siren_trigger = True
-        elif self.motion_duration > 0.8:
-            det_str = ", ".join(self.detected_objects) if self.detected_objects else "Obyekt"
-            self.alert_message = f"Harakat tekshirilmoqda... ({self.motion_duration:.1f}s / {self.CONFIRM_THRESHOLD_SEC:.1f}s) [{det_str}]"
-        else:
-            self.alert_message = "Tizim Tinch (Xavfsiz)"
+            if self.siren_active:
+                # Agar sirena faol bo'lsa -> hayvon ketgandan so'ng 5 soniya davomida ishlab turadi
+                if time_since_motion < self.SIREN_COOLDOWN_SEC:
+                    remaining = self.SIREN_COOLDOWN_SEC - time_since_motion
+                    self.siren_active = True
+                    self.alert_active = True
+                    self.alert_message = f"Hayvon ketdi. Sirena {remaining:.1f}s dan so'ng o'chadi..."
+                    status_color = (0, 140, 255) # To'q sariq / Amber
+                    status_text = f"[AI KUZATUV] Hayvon ketdi | Sirena o'chishi: {remaining:.1f}s"
+                else:
+                    # 5 soniya to'liq o'tdi -> Sirena o'chiriladi!
+                    self.siren_active = False
+                    self.alert_active = False
+                    self.motion_start_time = 0.0
+                    self.motion_duration = 0.0
+                    self.detected_objects = []
+                    self.alert_message = "Tizim Tinch (Xavfsiz)"
+                    status_color = (0, 140, 0) # Yashil
+                    status_text = f"[AI TINCH] Xavfsiz | {time.strftime('%H:%M:%S')}"
+            else:
+                # Sirena oldin yoqilmagan bo'lsa
+                if time_since_motion > 1.2:
+                    self.motion_start_time = 0.0
+                    self.motion_duration = 0.0
+                    self.detected_objects = []
+                    self.alert_active = False
+                    self.alert_message = "Tizim Tinch (Xavfsiz)"
+                status_color = (0, 140, 0) # Yashil
+                status_text = f"[AI TINCH] Xavfsiz | {time.strftime('%H:%M:%S')}"
 
         # 5. Kadr tepasiga AI holat sarlavhasi (Banner) chizish
-        if is_confirmed_alert:
-            status_color = (0, 0, 200) # Qizil
-            status_text = f"[AI XAVF] TASDIQLANDI ({self.motion_duration:.1f}s) | SIRENA!"
-        elif self.motion_duration > 0.8:
-            status_color = (0, 130, 240) # To'q sariq
-            status_text = f"[AI TAHLIL] {self.motion_duration:.1f}s / {self.CONFIRM_THRESHOLD_SEC:.1f}s | {', '.join(detected) if detected else 'Harakat'}"
-        else:
-            status_color = (0, 140, 0) # Yashil
-            status_text = f"[AI TINCH] Xavfsiz | {time.strftime('%H:%M:%S')}"
-
         cv2.rectangle(display_frame, (0, 0), (w, 22), status_color, -1)
         cv2.putText(display_frame, status_text, (6, 16),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
@@ -144,8 +162,8 @@ class SmartFarmAIDetector:
         # 6. Annotated kadrni JPEG ga kodlash
         ret, out_jpeg = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 78])
         if ret:
-            return out_jpeg.tobytes(), is_confirmed_alert, self.alert_message, self.detected_objects, siren_trigger
-        return jpeg_bytes, is_confirmed_alert, self.alert_message, self.detected_objects, siren_trigger
+            return out_jpeg.tobytes(), self.alert_active, self.alert_message, self.detected_objects, self.siren_active
+        return jpeg_bytes, self.alert_active, self.alert_message, self.detected_objects, self.siren_active
 
 detector = SmartFarmAIDetector()
 
@@ -190,10 +208,12 @@ class AIDetectionHandler(BaseHTTPRequestHandler):
             import json
             data = {
                 "alert_active": detector.alert_active,
+                "siren_active": detector.siren_active,
                 "alert_message": detector.alert_message,
                 "detected_objects": detector.detected_objects,
                 "motion_duration": detector.motion_duration,
-                "confirm_threshold": detector.CONFIRM_THRESHOLD_SEC
+                "confirm_threshold": detector.CONFIRM_THRESHOLD_SEC,
+                "siren_cooldown": detector.SIREN_COOLDOWN_SEC
             }
             self.wfile.write(json.dumps(data).encode('utf-8'))
             return
