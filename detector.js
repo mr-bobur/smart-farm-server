@@ -23,6 +23,7 @@ class SmartFarmDetector {
 
     // Oxirgi kadr va tahlil panjarasi (Grid)
     this.lastFrameBuffer = null;
+    this.lastFrameTime = 0;
     this.lastGrid = null;
     this.lastAnalysisTime = 0;
 
@@ -34,12 +35,20 @@ class SmartFarmDetector {
     this.placeholderBuffer = this._generatePlaceholderFrame();
     this.lastFrameBuffer = this.placeholderBuffer;
 
-    // Agar kamera ulanmagan bo'lsa ham brauzerlarga standby kadrini uzatib turish
+    // Agar kamera kadr yubormayotgan bo'lsa brauzerlarga standby kadrini uzatib turish
     setInterval(() => {
-      if (!this.streamReq || !this.lastFrameBuffer) {
+      const now = Date.now();
+      if (!this.streamReq && (now - this.lastFrameTime > 4000)) {
         this._broadcastFrame(this.placeholderBuffer);
       }
-    }, 1000);
+    }, 1500);
+  }
+
+  pushFrame(jpegBuffer) {
+    if (!jpegBuffer || jpegBuffer.length < 100) return false;
+    this.lastFrameTime = Date.now();
+    this._handleNewFrame(jpegBuffer);
+    return true;
   }
 
   startStream(url) {
@@ -158,6 +167,7 @@ class SmartFarmDetector {
 
   _handleNewFrame(frameBuffer) {
     this.lastFrameBuffer = frameBuffer;
+    this.lastFrameTime = Date.now();
     this._broadcastFrame(frameBuffer);
 
     // Harakat tahlili (~8 fps da bir marta)

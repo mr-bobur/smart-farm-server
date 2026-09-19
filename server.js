@@ -121,6 +121,23 @@ app.get('/video_feed', (req, res) => {
   detector.handleFeedRequest(req, res);
 });
 
+// Endpoint kamerasidan kadr qabul qilish (Frame Push Rejimi - NAT/Tashqi server uchun)
+app.post('/api/upload_frame', express.raw({ type: ['image/jpeg', 'application/octet-stream', '*/*'], limit: '5mb' }), (req, res) => {
+  if (req.body && req.body.length > 100) {
+    detector.pushFrame(req.body);
+    systemState.endpoint.camera_online = true;
+    systemState.endpoint.last_seen = Math.floor(Date.now() / 1000);
+    
+    // Javobda boshqaruv signallarini qaytarish (ultra tez sinxronizatsiya)
+    return res.json({
+      status: "ok",
+      servo_angle: systemState.servo_angle,
+      siren_active: systemState.siren_active
+    });
+  }
+  res.status(400).json({ error: "Bo'sh yoki noto'g'ri kadr" });
+});
+
 // Gateway Heartbeat qabul qilish
 app.post('/api/gateway_heartbeat', (req, res) => {
   const now = Math.floor(Date.now() / 1000);
@@ -146,13 +163,14 @@ app.post('/api/telemetry', (req, res) => {
   systemState.endpoint.online = true;
   systemState.endpoint.last_seen = now;
 
-  if (data.endpoint_ip && data.endpoint_ip !== "Ulanmagan") {
+  if (data.endpoint_ip) {
     systemState.endpoint.ip = data.endpoint_ip;
     systemState.telemetry.endpoint_ip = data.endpoint_ip;
 
-    // Kamera streamiga avtomatik ulanish
+    // Agar kamera o'zi kadr push qilmayotgan bo'lsa (masalan, lokal tarmoqda), pull rejimida urinib ko'rish
+    const isPushing = (Date.now() - detector.lastFrameTime < 4000);
     const streamUrl = `http://${data.endpoint_ip}:81/stream`;
-    if (!detector.cameraUrl || detector.cameraUrl !== streamUrl) {
+    if (!isPushing && (!detector.cameraUrl || detector.cameraUrl !== streamUrl)) {
       detector.startStream(streamUrl);
       systemState.endpoint.camera_online = true;
     }
