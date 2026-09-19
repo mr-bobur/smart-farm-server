@@ -96,8 +96,20 @@ const char* server_urls[] = {
   "http://10.242.63.226:8000/api/telemetry",   // Zaxira Ferma Hotspot
   "http://192.168.88.108:8000/api/telemetry"
 };
+
+const char* upload_frame_urls[] = {
+  "http://170.168.60.245:8000/api/upload_frame", // Real tashqi server IP
+  "http://10.24.95.226:8000/api/upload_frame",   // Asosiy lokal server IP
+  "http://192.168.88.109:8000/api/upload_frame",  // Zaxira IT-Park
+  "http://10.242.63.226:8000/api/upload_frame",   // Zaxira Ferma Hotspot
+  "http://192.168.88.108:8000/api/upload_frame"
+};
 const int num_server_urls = 5;
 int activeServerIdx = 0;
+
+TaskHandle_t streamTaskHandle = NULL;
+unsigned long framesUploaded = 0;
+int lastUploadHttpCode = 0;
 
 httpd_handle_t camera_httpd = NULL;
 httpd_handle_t stream_httpd = NULL;
@@ -253,15 +265,15 @@ bool initCamera() {
   config.pixel_format = PIXFORMAT_JPEG;
   
   if (psramFound()) {
-    config.frame_size = FRAMESIZE_VGA; // 640x480
-    config.jpeg_quality = 12;
+    config.frame_size = FRAMESIZE_QVGA; // 320x240 (Tezkor, past kechikishli oqim)
+    config.jpeg_quality = 18;           // Yengil kadr (~5-7 KB)
     config.fb_count = 2;
     config.fb_location = CAMERA_FB_IN_PSRAM;
     config.grab_mode = CAMERA_GRAB_LATEST;
-    Serial.println("[DEBUG KAMERA] 8MB OPI PSRAM buferi faollashtirildi (640x480 VGA).");
+    Serial.println("[DEBUG KAMERA] 8MB OPI PSRAM faol (320x240 QVGA @ Q18 Tezkor Rejim).");
   } else {
     config.frame_size = FRAMESIZE_QVGA; // 320x240
-    config.jpeg_quality = 14;
+    config.jpeg_quality = 20;
     config.fb_count = 1;
     config.fb_location = CAMERA_FB_IN_DRAM;
     config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
@@ -611,9 +623,43 @@ void printPeriodicDiagnostics() {
   Serial.printf ("| Patrol Rejimi : %-10s (45°->135°->45° / 20s sekin)    |\n", autoServoPatrol ? "20s FAOL" : "QO'LDA");
   Serial.printf ("| Wi-Fi Tarmogi : %-10s (RSSI: %-3d dBm, SSID: %s) |\n", 
                  WiFi.status() == WL_CONNECTED ? "ULANGAN" : "UZILGAN", WiFi.RSSI(), WiFi.SSID().c_str());
-  Serial.printf ("| Endpoint IP   : %-15s                         |\n", WiFi.localIP().toString().c_str());
+  Serial.printf ("| Video Oqimi   : %-5lu kadr (HTTP %-3d)                       |\n", framesUploaded, lastUploadHttpCode);
   Serial.printf ("| Server Aloqasi: HTTP %-3d (%s) |\n", lastHttpResponseCode, server_urls[activeServerIdx]);
   Serial.println("+-------------------------------------------------------------+");
+}
+
+// ---------------------- STREAM PUSH TASK (Core 0) ------------
+void streamUploadTask(void *pvParameters) {
+  Serial.println("[TASK] Tezkor Video Stream Push vazifasi Core 0 da faollashdi.");
+  vTaskDelay(pdMS_TO_TICKS(1500)); // Wi-Fi ulanishini kutish
+
+  HTTPClient http;
+  http.setReuse(true); // TCP keep-alive: ulanishni saqlab qolish orqali tezlikni 3x-4x oshirish
+
+  while (true) {
+    if (WiFi.status() == WL_CONNECTED && cameraFound) {
+      camera_fb_t *fb = esp_camera_fb_get();
+      if (fb) {
+        http.begin(upload_frame_urls[activeServerIdx]);
+        http.addHeader("Content-Type", "image/jpeg");
+        http.setTimeout(800);
+        int code = http.POST(fb->buf, fb->len);
+        lastUploadHttpCode = code;
+
+        if (code == 200) {
+          framesUploaded++;
+          String resp = http.getString();
+          if (resp.indexOf("\"siren_active\":true") >= 0) setSiren(true);
+          else if (resp.indexOf("\"siren_active\":false") >= 0) setSiren(false);
+        } else {
+          // Xatolik bo'lsa ulanishni qayta yangilash
+          http.end();
+        }
+        esp_camera_fb_return(fb);
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(40)); // ~12-15 FPS yuqori tezlik
+  }
 }
 
 // ---------------------- SETUP & LOOP -------------------------
@@ -698,6 +744,18 @@ void setup() {
 
   // 8. Native HTTP va Video Stream Serverlari
   startHttpServers();
+
+  // 9. Real-Time Video Stream Push Vazifasi (Core 0 da mustaqil ishlaydi)
+  xTaskCreatePinnedToCore(
+    streamUploadTask,
+    "StreamUploadTask",
+    8192,
+    NULL,
+    1,
+    &streamTaskHandle,
+    0
+  );
+  Serial.println("[SETUP] Video Stream Push Task Core 0 ga muvaffaqiyatli biriktirildi.");
 
   Serial.println("=======================================================");
   Serial.println("  TIZIM TO'LIQ ISHGA TUSHDI VA TELEMETRIYA FAOL!      ");
