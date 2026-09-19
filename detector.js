@@ -203,7 +203,7 @@ class SmartFarmDetector {
         'Content-Length': frameBuffer.length,
         'Connection': 'close'
       },
-      timeout: 600
+      timeout: 1500
     }, (res) => {
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
