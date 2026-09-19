@@ -47,6 +47,11 @@ class SmartFarmDetector {
   pushFrame(jpegBuffer) {
     if (!jpegBuffer || jpegBuffer.length < 100) return false;
     this.lastFrameTime = Date.now();
+    // Agar pull rejimi ishlab turgan bo'lsa, uni to'xtatish (chunki kadrlar push qilinmoqda)
+    if (this.streamReq || this.reconnectTimeout) {
+      this.stopStream();
+      this.cameraUrl = null;
+    }
     this._handleNewFrame(jpegBuffer);
     return true;
   }

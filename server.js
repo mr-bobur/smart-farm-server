@@ -167,8 +167,8 @@ app.post('/api/telemetry', (req, res) => {
     systemState.endpoint.ip = data.endpoint_ip;
     systemState.telemetry.endpoint_ip = data.endpoint_ip;
 
-    // Agar kamera o'zi kadr push qilmayotgan bo'lsa (masalan, lokal tarmoqda), pull rejimida urinib ko'rish
-    const isPushing = (Date.now() - detector.lastFrameTime < 4000);
+    // Agar kamera o'zi kadr push qilib turgan bo'lsa, pull urinishlarini to'xtatish
+    const isPushing = (detector.lastFrameTime > 0 && (Date.now() - detector.lastFrameTime < 20000));
     const streamUrl = `http://${data.endpoint_ip}:81/stream`;
     if (!isPushing && (!detector.cameraUrl || detector.cameraUrl !== streamUrl)) {
       detector.startStream(streamUrl);
