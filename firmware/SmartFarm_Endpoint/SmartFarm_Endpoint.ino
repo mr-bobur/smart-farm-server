@@ -257,19 +257,19 @@ bool initCamera() {
   config.pixel_format = PIXFORMAT_JPEG;
   
   if (psramFound()) {
-    config.frame_size = FRAMESIZE_QVGA; // 320x240 (Tezkor, past kechikishli oqim)
-    config.jpeg_quality = 18;           // Yengil kadr (~5-7 KB)
-    config.fb_count = 2;
+    config.frame_size = FRAMESIZE_VGA;  // 640x480 (Maksimal tiniq sifat)
+    config.jpeg_quality = 10;           // Maksimal sifat (kam siqish, tiniq tasvir)
+    config.fb_count = 2;                // 2 bufer (parallel kadr olish va uzatish)
     config.fb_location = CAMERA_FB_IN_PSRAM;
-    config.grab_mode = CAMERA_GRAB_LATEST;
-    Serial.println("[DEBUG KAMERA] 8MB OPI PSRAM faol (320x240 QVGA @ Q18 Tezkor Rejim).");
+    config.grab_mode = CAMERA_GRAB_LATEST; // Doim eng so'nggi kadr (lag bo'lmaydi)
+    Serial.println("[DEBUG KAMERA] 8MB OPI PSRAM faol (640x480 VGA @ Q10 Maksimal Sifat).");
   } else {
-    config.frame_size = FRAMESIZE_QVGA; // 320x240
-    config.jpeg_quality = 20;
+    config.frame_size = FRAMESIZE_VGA;  // 640x480
+    config.jpeg_quality = 12;
     config.fb_count = 1;
     config.fb_location = CAMERA_FB_IN_DRAM;
-    config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
-    Serial.println("[DEBUG KAMERA] DRAM rejimi (320x240 QVGA).");
+    config.grab_mode = CAMERA_GRAB_LATEST;
+    Serial.println("[DEBUG KAMERA] DRAM rejimi (640x480 VGA).");
   }
 
   esp_err_t err = esp_camera_init(&config);
@@ -284,6 +284,14 @@ bool initCamera() {
     // 180° ga to'g'ri burish
     s->set_vflip(s, 0);
     s->set_hmirror(s, 0);
+    // Maksimal tiniqlik va sifat uchun sensor sozlamalari
+    s->set_brightness(s, 1);
+    s->set_contrast(s, 1);
+    s->set_saturation(s, 0);
+    s->set_sharpness(s, 1);
+    s->set_whitebal(s, 1);
+    s->set_awb_gain(s, 1);
+    s->set_denoise(s, 1);
   }
 
   Serial.println("[OK KAMERA] OV2640 Kamera muvaffaqiyatli ishga tushdi (180° burilgan)!");
@@ -625,14 +633,17 @@ void streamUploadTask(void *pvParameters) {
   Serial.println("[TASK] Tezkor Video Stream Push vazifasi Core 0 da faollashdi.");
   vTaskDelay(pdMS_TO_TICKS(1500)); // Wi-Fi ulanishini kutish
 
+  HTTPClient http;
+  http.setReuse(true); // TCP ulanishni qayta ishlatish (Keep-Alive - maksimal tezlik)
+
   while (true) {
     if (WiFi.status() == WL_CONNECTED && cameraFound) {
       camera_fb_t *fb = esp_camera_fb_get();
       if (fb) {
-        HTTPClient http;
         http.begin(upload_frame_urls[0]);
         http.addHeader("Content-Type", "image/jpeg");
-        http.setTimeout(1200);
+        http.addHeader("Connection", "keep-alive");
+        http.setTimeout(1500);
         int code = http.POST(fb->buf, fb->len);
         lastUploadHttpCode = code;
 
@@ -641,12 +652,13 @@ void streamUploadTask(void *pvParameters) {
           String resp = http.getString();
           if (resp.indexOf("\"siren_active\":true") >= 0) setSiren(true);
           else if (resp.indexOf("\"siren_active\":false") >= 0) setSiren(false);
+        } else {
+          http.end(); // Xatolik bo'lsa ulanishni qayta yangilash
         }
-        http.end(); // To'liq tozalash va sarlavhalar toshishini bartaraf qilish
         esp_camera_fb_return(fb);
       }
     }
-    vTaskDelay(pdMS_TO_TICKS(40)); // ~12-15 FPS uzluksiz video
+    vTaskDelay(pdMS_TO_TICKS(10)); // Maksimal tezlik (10ms kechikish)
   }
 }
 

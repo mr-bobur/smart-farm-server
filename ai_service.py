@@ -98,27 +98,34 @@ class SmartFarmAIDetector:
         valid_contours = []
         total_motion_area = 0
 
+        # Kadr o'lchamiga mos adaptiv miqyos (QVGA 320x240, VGA 640x480, SVGA 800x600)
+        scale = max(1.0, total_frame_area / 76800.0)
+        th_min = int(700 * scale)
+        th_large = int(1500 * scale)
+        th_human = int(2400 * scale)
+        min_dim = int(18 * np.sqrt(scale))
+
         for c in contours:
             area = cv2.contourArea(c)
             total_motion_area += area
 
-            # Hayvonlar uchun minimal maydon chegarasi: area >= 700 px
-            if area >= 700:
+            # Hayvonlar uchun moslashuvchan minimal maydon chegarasi
+            if area >= th_min:
                 (x, y, bw, bh) = cv2.boundingRect(c)
                 solidity = area / float(bw * bh)
 
                 # Shovqinlarni chetlatish: uzun ingichka simlar, simmetriyasiz qirralar (solidity < 0.28)
-                if solidity < 0.28 or bw < 18 or bh < 18:
+                if solidity < 0.28 or bw < min_dim or bh < min_dim:
                     continue
 
                 aspect_ratio = bh / float(bw)
 
                 # Hayvon va odamni tasniflash
-                if area >= 2400 and aspect_ratio > 1.25:
+                if area >= th_human and aspect_ratio > 1.25:
                     label = "ODAM / SHAXS"
                     color = (0, 0, 240) # Qizil
                     tag = "Odam"
-                elif area >= 1500:
+                elif area >= th_large:
                     label = "YIRIK HAYVON"
                     color = (0, 140, 255) # To'q sariq (Orange)
                     tag = "Yirik Hayvon"
@@ -201,8 +208,8 @@ class SmartFarmAIDetector:
         cv2.putText(display_frame, status_text, (6, 16),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
 
-        # 7. Annotated kadrni JPEG ga kodlash
-        ret, out_jpeg = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 78])
+        # 7. Annotated kadrni JPEG ga kodlash (Maksimal tiniq sifat: Q85)
+        ret, out_jpeg = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         if ret:
             return out_jpeg.tobytes(), self.alert_active, self.alert_message, self.detected_objects, self.siren_active
         return jpeg_bytes, self.alert_active, self.alert_message, self.detected_objects, self.siren_active

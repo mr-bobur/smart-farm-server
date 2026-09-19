@@ -135,7 +135,7 @@ app.get('/video_feed', (req, res) => {
 });
 
 // Endpoint kamerasidan kadr qabul qilish (Frame Push Rejimi - NAT/Tashqi server uchun)
-app.post('/api/upload_frame', express.raw({ type: ['image/jpeg', 'application/octet-stream', '*/*'], limit: '5mb' }), (req, res) => {
+app.post('/api/upload_frame', express.raw({ type: ['image/jpeg', 'application/octet-stream', '*/*'], limit: '15mb' }), (req, res) => {
   if (req.body && req.body.length > 100) {
     detector.pushFrame(req.body);
     systemState.endpoint.camera_online = true;
