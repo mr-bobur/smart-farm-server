@@ -179,6 +179,15 @@ class SmartFarmDetector {
 
   _handleNewFrame(frameBuffer) {
     this.lastFrameTime = Date.now();
+
+    // Agar Python AI hozir boshqa kadrni tahlil qilayotgan bo'lsa, navbat kutmaymiz!
+    // Brauzerlarga uzluksiz oqimni beramiz (video hech qachon to'xtab qolmasligi uchun)
+    if (this.aiProcessing) {
+      this._broadcastFrame(this.lastFrameBuffer || frameBuffer);
+      return;
+    }
+
+    this.aiProcessing = true;
     this._sendToAiService(frameBuffer);
   }
 
@@ -188,16 +197,18 @@ class SmartFarmDetector {
       port: 5001,
       path: '/process_frame',
       method: 'POST',
-      agent: aiAgent,
+      agent: false,
       headers: {
         'Content-Type': 'image/jpeg',
-        'Content-Length': frameBuffer.length
+        'Content-Length': frameBuffer.length,
+        'Connection': 'close'
       },
-      timeout: 800
+      timeout: 600
     }, (res) => {
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
       res.on('end', () => {
+        this.aiProcessing = false;
         if (res.statusCode === 200 && chunks.length > 0) {
           const annotatedBuffer = Buffer.concat(chunks);
           this.lastFrameBuffer = annotatedBuffer;
@@ -235,12 +246,13 @@ class SmartFarmDetector {
     });
 
     req.on('error', () => {
-      // Python AI servisi kutilmaganda to'xtasa video uzilmasligi uchun asl kadr uzatiladi
+      this.aiProcessing = false;
       this.lastFrameBuffer = frameBuffer;
       this._broadcastFrame(frameBuffer);
     });
 
     req.on('timeout', () => {
+      this.aiProcessing = false;
       try { req.destroy(); } catch (e) {}
       this.lastFrameBuffer = frameBuffer;
       this._broadcastFrame(frameBuffer);

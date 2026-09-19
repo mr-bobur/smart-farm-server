@@ -607,12 +607,27 @@
 
     // Video Oqimini Nazorat Qilish va Avto-Qayta Ulanish
     const cameraImg = document.getElementById('cameraStream');
+    let lastFrameReceivedTime = Date.now();
+
+    cameraImg.onload = function() {
+      lastFrameReceivedTime = Date.now();
+    };
+
     cameraImg.onerror = function() {
       console.warn("Video oqimida uzilish aniqlandi, 1 soniyadan so'ng qayta ulanmoqda...");
       setTimeout(() => {
         cameraImg.src = '/video_feed?t=' + Date.now();
       }, 1000);
     };
+
+    // Agar kadr 6 soniyadan ko'proq kelmay qotsa, oqimni avtomatik qayta yangilash
+    setInterval(() => {
+      if (Date.now() - lastFrameReceivedTime > 6000) {
+        lastFrameReceivedTime = Date.now();
+        console.warn("Video oqimi yangilanmoqda...");
+        cameraImg.src = '/video_feed?t=' + Date.now();
+      }
+    }, 3000);
 
     function connectCameraStream() {
       const btn = document.getElementById('connectStreamBtn');

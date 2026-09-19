@@ -1,35 +1,36 @@
 #!/usr/bin/env python3
 """
-Smart Farm AI Animal and Motion Detector Service
-OpenCV MOG2 + Morfologik filtr + 3.5s Temporal Persistence Filter
+Smart Farm AI Animal & Intruder Detection Microservice
+OpenCV MOG2 + Morfologik filtr + 3.0s Temporal Persistence Filter
+ThreadingHTTPServer orqali yuqori tezlik va barqarorlik
 """
 import sys
 import time
 import urllib.parse
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import cv2
 import numpy as np
 
 class SmartFarmAIDetector:
     def __init__(self):
         # MOG2 Background Subtractor
-        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=350, varThreshold=26, detectShadows=True)
+        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=300, varThreshold=24, detectShadows=True)
         
-        # State
+        # Holatlar
         self.alert_active = False
         self.alert_message = "Tizim Tinch (Xavfsiz)"
         self.detected_objects = []
         self.auto_siren = True
         self.last_alert_time = 0
         
-        # 3.5 soniyalik harakat tasdiqlash filtri
+        # 3.0 soniyalik harakat tasdiqlash filtri
         self.motion_start_time = 0.0
         self.motion_last_seen = 0.0
         self.motion_duration = 0.0
-        self.CONFIRM_THRESHOLD_SEC = 3.5 # 3.5 soniya uzluksiz harakat tasdiqlanishi
+        self.CONFIRM_THRESHOLD_SEC = 3.0 # 3.0 soniya uzluksiz harakatda xavf tasdiqlanadi
 
     def process_frame(self, jpeg_bytes):
-        # 1. JPEG ni NumPy massiviga dekodlash
+        # 1. JPEG ni dekodlash
         nparr = np.frombuffer(jpeg_bytes, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if frame is None:
@@ -43,10 +44,10 @@ class SmartFarmAIDetector:
         total_motion_area = 0
         now = time.time()
 
-        # 2. MOG2 orqa fon ajratgich
+        # 2. MOG2 orqa fon ajratish
         fg_mask = self.bg_subtractor.apply(frame)
 
-        # 3. Morfologik shovqin filtri
+        # 3. Morfologik shovqin filtri (mayda o't-o'lan tebranishini tozalash)
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         thresh = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_DILATE, kernel)
@@ -58,23 +59,23 @@ class SmartFarmAIDetector:
             area = cv2.contourArea(c)
             total_motion_area += area
 
-            # 320x240 o'lchamga moslashtirilgan o'lcham chegarasi (shovqinlarni chetlatish)
-            if area > 450:
+            # Kichik shovqinlarni chetlatish (area > 200)
+            if area > 200:
                 (x, y, bw, bh) = cv2.boundingRect(c)
 
-                # Agar bitta obyekt butun kadrning 40% dan ortig'ini egallasa (kamera burilganda) -> inkor qilish
+                # Kamera 20s patrul qilganda bitta ulkan blok butun kadrni qoplasa -> inkor qilish
                 if area > total_frame_area * 0.40:
                     continue
 
                 raw_motion = True
                 aspect_ratio = bh / float(bw)
 
-                # Hayvon va obyektlarni tasniflash (Classification)
-                if area > 2400 and aspect_ratio > 1.2:
+                # Hayvon va obyektlarni tasniflash
+                if area > 1600 and aspect_ratio > 1.2:
                     label = "ODAM / SHAXS?"
                     color = (0, 0, 240) # Qizil
                     detected.append("Odam")
-                elif area > 1100:
+                elif area > 600:
                     label = "YIRIK HAYVON?"
                     color = (0, 140, 255) # To'q sariq (Orange)
                     detected.append("Yirik Hayvon")
@@ -83,24 +84,24 @@ class SmartFarmAIDetector:
                     color = (0, 225, 255) # Sariq
                     detected.append("Harakatlanuvchi Jism")
 
-                # Kadrdagi obyekt atrofini chizish
+                # Bounding box chizish
                 cv2.rectangle(display_frame, (x, y), (x + bw, y + bh), color, 2)
                 cv2.putText(display_frame, label, (x, max(16, y - 5)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1, cv2.LINE_AA)
 
-        # Agar kadrning 45% dan ortig'i bir vaqtda qimirlasa (servo patrullash payti) -> global harakat
+        # Agar kadrning 45% dan ortig'i bir vaqtda qimirlasa (servo patrullash payti)
         if total_motion_area > total_frame_area * 0.45:
             raw_motion = False
             detected = []
 
-        # 4. --- 3.5 SONIYALIK DAVOMIYLIK VA TASDIQLASH FILTRI ---
+        # 4. --- 3.0 SONIYALIK DAVOMIYLIK VA TASDIQLASH FILTRI ---
         if raw_motion:
             self.motion_last_seen = now
             if self.motion_start_time == 0.0:
                 self.motion_start_time = now
             self.motion_duration = now - self.motion_start_time
         else:
-            # Agar 1.2 soniya harakat ko'rinmasa taymer qayta tiklanadi
+            # 1.2 soniya harakat ko'rinmasa taymer qayta tiklanadi
             if now - self.motion_last_seen > 1.2:
                 self.motion_start_time = 0.0
                 self.motion_duration = 0.0
@@ -130,10 +131,10 @@ class SmartFarmAIDetector:
             status_color = (0, 0, 200) # Qizil
             status_text = f"[AI XAVF] TASDIQLANDI ({self.motion_duration:.1f}s) | SIRENA!"
         elif self.motion_duration > 0.8:
-            status_color = (0, 130, 240) # To'q sariq (Tekshiruv)
+            status_color = (0, 130, 240) # To'q sariq
             status_text = f"[AI TAHLIL] {self.motion_duration:.1f}s / {self.CONFIRM_THRESHOLD_SEC:.1f}s | {', '.join(detected) if detected else 'Harakat'}"
         else:
-            status_color = (0, 140, 0) # Yashil (Tinch)
+            status_color = (0, 140, 0) # Yashil
             status_text = f"[AI TINCH] Xavfsiz | {time.strftime('%H:%M:%S')}"
 
         cv2.rectangle(display_frame, (0, 0), (w, 22), status_color, -1)
@@ -141,7 +142,7 @@ class SmartFarmAIDetector:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
 
         # 6. Annotated kadrni JPEG ga kodlash
-        ret, out_jpeg = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        ret, out_jpeg = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 78])
         if ret:
             return out_jpeg.tobytes(), is_confirmed_alert, self.alert_message, self.detected_objects, siren_trigger
         return jpeg_bytes, is_confirmed_alert, self.alert_message, self.detected_objects, siren_trigger
@@ -149,11 +150,14 @@ class SmartFarmAIDetector:
 detector = SmartFarmAIDetector()
 
 class AIDetectionHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def do_POST(self):
         if self.path == '/process_frame':
             content_length = int(self.headers.get('Content-Length', 0))
             if content_length <= 0:
                 self.send_response(400)
+                self.send_header('Connection', 'close')
                 self.end_headers()
                 return
 
@@ -163,6 +167,7 @@ class AIDetectionHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', 'image/jpeg')
             self.send_header('Content-Length', str(len(annotated_jpeg)))
+            self.send_header('Connection', 'close')
             self.send_header('X-AI-Alert', '1' if is_alert else '0')
             self.send_header('X-AI-Siren', '1' if siren else '0')
             self.send_header('X-AI-Duration', f'{detector.motion_duration:.1f}')
@@ -173,12 +178,14 @@ class AIDetectionHandler(BaseHTTPRequestHandler):
             return
 
         self.send_response(404)
+        self.send_header('Connection', 'close')
         self.end_headers()
 
     def do_GET(self):
         if self.path == '/status':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
+            self.send_header('Connection', 'close')
             self.end_headers()
             import json
             data = {
@@ -192,13 +199,14 @@ class AIDetectionHandler(BaseHTTPRequestHandler):
             return
 
         self.send_response(404)
+        self.send_header('Connection', 'close')
         self.end_headers()
 
     def log_message(self, format, *args):
         return
 
 def run(port=5001):
-    server = HTTPServer(('127.0.0.1', port), AIDetectionHandler)
+    server = ThreadingHTTPServer(('127.0.0.1', port), AIDetectionHandler)
     print(f"Smart Farm AI Animal Detector Service faol: http://127.0.0.1:{port}", flush=True)
     server.serve_forever()
 

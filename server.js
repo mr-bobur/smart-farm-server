@@ -73,15 +73,6 @@ detector.sirenCallback = async (active) => {
     log: msg,
     siren_active: active
   });
-
-  const endpointIp = systemState.endpoint.ip;
-  if (endpointIp && endpointIp !== "Ulanmagan") {
-    try {
-      fetch(`http://${endpointIp}/siren?state=${active ? '1' : '0'}`, {
-        signal: AbortSignal.timeout(1200)
-      }).catch(() => {});
-    } catch (e) {}
-  }
 };
 
 // AI Holati va Tahlilini real vaqtda Dashboardga uzatish
@@ -234,13 +225,6 @@ app.post('/api/servo', (req, res) => {
   systemState.servo_angle = angle;
   broadcastWs({ servo_angle: angle, log: `Kamera burildi: ${angle}°` });
 
-  const endpointIp = systemState.endpoint.ip;
-  if (endpointIp && endpointIp !== "Ulanmagan") {
-    fetch(`http://${endpointIp}/servo?angle=${angle}`, {
-      signal: AbortSignal.timeout(1200)
-    }).catch(() => {});
-  }
-
   res.json({ status: "ok", angle });
 });
 
@@ -257,15 +241,6 @@ app.post('/api/siren', (req, res) => {
     siren_active: active,
     log: `Sirena: ${active ? 'YOQILDI' : 'O`CHIRILDI'}`
   });
-
-  const endpointIp = systemState.endpoint.ip;
-  if (endpointIp && endpointIp !== "Ulanmagan") {
-    fetch(`http://${endpointIp}/siren?state=${active ? '1' : '0'}`, {
-      signal: AbortSignal.timeout(1200)
-    }).catch((err) => {
-      console.warn(`[WARN] Endpoint /siren chaqiruvida xatolik: ${err.message}`);
-    });
-  }
 
   res.json({ status: "ok", siren_active: active });
 });
