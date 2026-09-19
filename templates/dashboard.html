@@ -546,24 +546,37 @@
         updateSirenUI(data.siren_active);
       }
 
-      // 6. AI Alert State
-      if (data.ai_alert !== undefined) {
-        const badge = document.getElementById('statusBadge');
-        const text = document.getElementById('statusText');
-        const banner = document.getElementById('alertBanner');
-        const bannerText = document.getElementById('alertBannerText');
+        // 6. AI Alert State
+        if (data.ai_alert !== undefined || data.motion_duration !== undefined) {
+          const badge = document.getElementById('statusBadge');
+          const text = document.getElementById('statusText');
+          const banner = document.getElementById('alertBanner');
+          const bannerText = document.getElementById('alertBannerText');
+          const aiTag = document.getElementById('aiTag');
 
-        if (data.ai_alert) {
-          badge.className = "px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 bg-red-950/80 text-red-300 border border-red-500/50 neon-red";
-          text.innerText = "OGOHLANTIRISH: Xavf!";
-          banner.classList.remove('hidden');
-          bannerText.innerText = data.ai_message || "Harakat / Begona obyekt aniqlandi!";
-        } else {
-          badge.className = "px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 bg-emerald-950/60 text-emerald-400 border border-emerald-500/30";
-          text.innerText = "Xavfsizlik: Tinch";
-          banner.classList.add('hidden');
+          if (data.ai_alert) {
+            badge.className = "px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 bg-red-950/80 text-red-300 border border-red-500/50 neon-red animate-pulse";
+            text.innerText = data.ai_message || "XAVF: Begona jism / Hayvon!";
+            banner.classList.remove('hidden');
+            bannerText.innerText = data.ai_message || "XAVF: Harakat aniqlandi!";
+          } else if (data.motion_duration && data.motion_duration > 0.8) {
+            badge.className = "px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 bg-amber-950/80 text-amber-300 border border-amber-500/50 neon-amber";
+            text.innerText = data.ai_message || `Tahlil qilinmoqda (${data.motion_duration}s)...`;
+            banner.classList.add('hidden');
+          } else if (!data.ai_alert) {
+            badge.className = "px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 bg-emerald-950/60 text-emerald-400 border border-emerald-500/30";
+            text.innerText = "Xavfsizlik: Tinch";
+            banner.classList.add('hidden');
+          }
+
+          if (data.detected_objects && data.detected_objects.length > 0) {
+            aiTag.innerText = `AI Aniqlandi: ${data.detected_objects.join(', ')}`;
+            aiTag.className = "text-xs px-2.5 py-1 rounded-full bg-amber-950/80 text-amber-300 border border-amber-500/40 animate-pulse";
+          } else {
+            aiTag.innerText = "AI Tahlil Faol (OpenCV MOG2)";
+            aiTag.className = "text-xs px-2.5 py-1 rounded-full bg-blue-900/60 text-blue-300 border border-blue-500/30";
+          }
         }
-      }
 
       if (data.log) {
         addLog(data.log);

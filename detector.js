@@ -1,6 +1,12 @@
 const http = require('http');
 const jpeg = require('jpeg-js');
 
+const aiAgent = new http.Agent({
+  keepAlive: true,
+  maxSockets: 5,
+  keepAliveMsecs: 10000
+});
+
 class SmartFarmDetector {
   constructor() {
     this.cameraUrl = null;
@@ -13,6 +19,7 @@ class SmartFarmDetector {
     this.detectedObjects = [];
     this.autoSiren = true;
     this.sirenCallback = null;
+    this.onStatusChange = null;
     this.lastAlertTime = 0;
     
     // 4.5 soniyalik harakat tasdiqlash filtri
@@ -171,107 +178,76 @@ class SmartFarmDetector {
   }
 
   _handleNewFrame(frameBuffer) {
-    this.lastFrameBuffer = frameBuffer;
     this.lastFrameTime = Date.now();
-    this._broadcastFrame(frameBuffer);
-
-    // Harakat tahlili (~8 fps da bir marta)
-    const now = Date.now();
-    if (now - this.lastAnalysisTime >= 120) {
-      this.lastAnalysisTime = now;
-      this._analyzeMotion(frameBuffer);
-    }
+    this._sendToAiService(frameBuffer);
   }
 
-  _analyzeMotion(jpegBuffer) {
-    try {
-      // JPEG kadrini dekodlash (useTArray tezkor o'qish uchun)
-      const decoded = jpeg.decode(jpegBuffer, { useTArray: true, formatAsRGBA: false });
-      const { width, height, data } = decoded;
+  _sendToAiService(frameBuffer) {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port: 5001,
+      path: '/process_frame',
+      method: 'POST',
+      agent: aiAgent,
+      headers: {
+        'Content-Type': 'image/jpeg',
+        'Content-Length': frameBuffer.length
+      },
+      timeout: 800
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        if (res.statusCode === 200 && chunks.length > 0) {
+          const annotatedBuffer = Buffer.concat(chunks);
+          this.lastFrameBuffer = annotatedBuffer;
+          this._broadcastFrame(annotatedBuffer);
 
-      // 32x24 o'lchamli past aniqlikdagi yorug'lik (luminance) panjarasiga siqish
-      const cols = 32;
-      const rows = 24;
-      const currentGrid = new Uint8Array(cols * rows);
+          const isAlert = res.headers['x-ai-alert'] === '1';
+          const isSiren = res.headers['x-ai-siren'] === '1';
+          const msg = decodeURIComponent(res.headers['x-ai-message'] || '');
+          const objStr = decodeURIComponent(res.headers['x-ai-objects'] || '');
+          const objects = objStr ? objStr.split(',') : [];
+          const duration = parseFloat(res.headers['x-ai-duration'] || '0');
 
-      const stepX = Math.floor(width / cols);
-      const stepY = Math.floor(height / rows);
+          this.alertActive = isAlert;
+          this.alertMessage = msg;
+          this.detectedObjects = objects;
 
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          const pxX = c * stepX + Math.floor(stepX / 2);
-          const pxY = r * stepY + Math.floor(stepY / 2);
-          const idx = (pxY * width + pxX) * 3;
-          // Luminance = 0.299*R + 0.587*G + 0.114*B
-          const lum = Math.floor(data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114);
-          currentGrid[r * cols + c] = lum;
+          if (this.onStatusChange) {
+            this.onStatusChange({
+              alertActive: isAlert,
+              alertMessage: msg,
+              detectedObjects: objects,
+              motionDuration: duration,
+              sirenTrigger: isSiren
+            });
+          }
+
+          if (isSiren && this.autoSiren && this.sirenCallback) {
+            this.sirenCallback(true);
+          }
+        } else {
+          this.lastFrameBuffer = frameBuffer;
+          this._broadcastFrame(frameBuffer);
         }
-      }
+      });
+    });
 
-      if (!this.lastGrid) {
-        this.lastGrid = currentGrid;
-        return;
-      }
+    req.on('error', () => {
+      // Python AI servisi kutilmaganda to'xtasa video uzilmasligi uchun asl kadr uzatiladi
+      this.lastFrameBuffer = frameBuffer;
+      this._broadcastFrame(frameBuffer);
+    });
 
-      // Oldingi kadr bilan farqni solishtirish
-      let diffCells = 0;
-      const totalCells = cols * rows; // 768
+    req.on('timeout', () => {
+      try { req.destroy(); } catch (e) {}
+      this.lastFrameBuffer = frameBuffer;
+      this._broadcastFrame(frameBuffer);
+    });
 
-      for (let i = 0; i < totalCells; i++) {
-        if (Math.abs(currentGrid[i] - this.lastGrid[i]) > 26) {
-          diffCells++;
-        }
-      }
-      this.lastGrid = currentGrid;
-
-      // Global harakat (masalan, kamera burilganda butun fon qimirlasa) -> filtrlaymiz
-      const diffRatio = diffCells / totalCells;
-      let rawMotion = false;
-
-      if (diffRatio >= 0.04 && diffRatio <= 0.40) {
-        rawMotion = true; // Lokal obyekt / hayvon harakati!
-      }
-
-      // --- 4.5 SONIYALIK DAVOMIYLIK FILTRI ---
-      const now = Date.now();
-      if (rawMotion) {
-        this.motionLastSeen = now;
-        if (this.motionStartTime === 0) {
-          this.motionStartTime = now;
-        }
-        this.motionDuration = (now - this.motionStartTime) / 1000;
-      } else {
-        // Agar 1.2 soniya davomida harakat bo'lmasa, taymer qaytariladi
-        if (now - this.motionLastSeen > 1200) {
-          this.motionStartTime = 0;
-          this.motionDuration = 0;
-        }
-      }
-
-      // Tasdiqlangan xavf holati
-      const isConfirmedAlert = (this.motionDuration >= this.CONFIRM_THRESHOLD_SEC);
-      this.alertActive = isConfirmedAlert;
-
-      if (isConfirmedAlert) {
-        this.alertMessage = `XAVF TASDIQLANDI (${this.motionDuration.toFixed(1)}s): Harakat / Begona Jism!`;
-        this.detectedObjects = ["Harakatlanuvchi Obyekt / Hayvon"];
-
-        // Avtomatik sirena callback (kamida 6 soniya interval bilan)
-        if (this.autoSiren && this.sirenCallback && (now - this.lastAlertTime > 6000)) {
-          this.lastAlertTime = now;
-          this.sirenCallback(true);
-        }
-      } else if (this.motionDuration > 0.8) {
-        this.alertMessage = `Harakat tahlil qilinmoqda... (${this.motionDuration.toFixed(1)}s / ${this.CONFIRM_THRESHOLD_SEC.toFixed(1)}s)`;
-        this.detectedObjects = [];
-      } else {
-        this.alertMessage = "Tizim Tinch (Xavfsiz)";
-        this.detectedObjects = [];
-      }
-
-    } catch (e) {
-      // Dekodlashda xato bo'lsa (chala kadr) chetlab o'tish
-    }
+    req.write(frameBuffer);
+    req.end();
   }
 
   _broadcastFrame(frameBuffer) {

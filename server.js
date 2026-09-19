@@ -84,6 +84,24 @@ detector.sirenCallback = async (active) => {
   }
 };
 
+// AI Holati va Tahlilini real vaqtda Dashboardga uzatish
+let lastWsAlertBroadcast = 0;
+detector.onStatusChange = (status) => {
+  systemState.ai_alert = status.alertActive;
+  systemState.ai_message = status.alertMessage;
+
+  const now = Date.now();
+  if (status.alertActive || (now - lastWsAlertBroadcast > 350)) {
+    lastWsAlertBroadcast = now;
+    broadcastWs({
+      ai_alert: status.alertActive,
+      ai_message: status.alertMessage,
+      detected_objects: status.detectedObjects,
+      motion_duration: status.motionDuration
+    });
+  }
+};
+
 // WebSocket ulanishlarini qabul qilish
 wss.on('connection', (ws) => {
   // Yangi mijozga to'liq boshlang'ich holatni uzatish
