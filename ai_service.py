@@ -14,7 +14,7 @@ import numpy as np
 class SmartFarmAIDetector:
     def __init__(self):
         # MOG2 Background Subtractor
-        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=300, varThreshold=24, detectShadows=True)
+        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=300, varThreshold=26, detectShadows=True)
         
         # Holatlar
         self.alert_active = False
@@ -28,8 +28,13 @@ class SmartFarmAIDetector:
         self.motion_start_time = 0.0
         self.motion_last_seen = 0.0
         self.motion_duration = 0.0
-        self.CONFIRM_THRESHOLD_SEC = 3.0 # 3.0 soniya uzluksiz harakatda xavf tasdiqlanadi
+        self.CONFIRM_THRESHOLD_SEC = 3.0 # 3.0 soniya uzluksiz hayvon harakatida xavf tasdiqlanadi
         self.SIREN_COOLDOWN_SEC = 5.0 # Hayvon ketgandan so'ng 5.0 soniya o'tib sirena o'chadi
+
+        # Kamera burilishi (Pan) va silkinishini aniqlash
+        self.prev_gray = None
+        self.prev_gray_f32 = None
+        self.last_pan_time = 0.0
 
     def process_frame(self, jpeg_bytes):
         # 1. JPEG ni dekodlash
@@ -41,62 +46,103 @@ class SmartFarmAIDetector:
         h, w = frame.shape[:2]
         total_frame_area = w * h
         display_frame = frame.copy()
-        detected = []
-        raw_motion = False
-        total_motion_area = 0
         now = time.time()
 
-        # 2. MOG2 orqa fon ajratish
+        # 2. Kamera harakatini (Servo burilishi / Pan) global siljish orqali aniqlash
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        is_camera_panning = False
+        pan_shift = 0.0
+
+        if self.prev_gray_f32 is not None:
+            shift, response = cv2.phaseCorrelate(self.prev_gray_f32, np.float32(gray))
+            pan_shift = np.sqrt(shift[0]**2 + shift[1]**2)
+            # Agar butun kadr 0.6px dan ko'p siljigan bo'lsa -> Kamera harakatlanmoqda!
+            if pan_shift > 0.60 and response > 0.18:
+                is_camera_panning = True
+                self.last_pan_time = now
+
+        self.prev_gray = gray
+        self.prev_gray_f32 = np.float32(gray)
+
+        # Agar kamera burilayotgan bo'lsa yoki burilishdan so'ng 0.35s o'tmagan bo'lsa -> Tahlil pauzada
+        is_pan_settling = (now - self.last_pan_time < 0.35)
+
+        if is_camera_panning or is_pan_settling:
+            # Fon modelini tezlashtirilgan tarzda moslashtirish (kamera burilganda eski qoldiq qolmasligi uchun)
+            self.bg_subtractor.apply(frame, learningRate=0.2)
+            status_color = (180, 130, 0) # Ko'k-sariq
+            status_text = f"[KAMERA BURILMOQDA] Patrul tahlili pauzada ({pan_shift:.1f}px)"
+            cv2.rectangle(display_frame, (0, 0), (w, 22), status_color, -1)
+            cv2.putText(display_frame, status_text, (6, 16), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
+
+            # Kamera harakatlanayotganda hayvon taymerini to'xtatish
+            self.motion_start_time = 0.0
+            self.motion_duration = 0.0
+
+            ret, out_jpeg = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 78])
+            if ret:
+                return out_jpeg.tobytes(), False, "Kamera burilmoqda...", [], self.siren_active
+            return jpeg_bytes, False, "Kamera burilmoqda...", [], self.siren_active
+
+        # 3. MOG2 orqa fon ajratish (Kamera qo'zg'almas turganda)
         fg_mask = self.bg_subtractor.apply(frame)
 
-        # 3. Morfologik shovqin filtri (mayda o't-o'lan tebranishini tozalash)
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        # 4. Kengaytirilgan morfologik shovqin filtri (5x5 - mayda o't, barg va piksel shovqinini yo'qotish)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
         thresh = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_DILATE, kernel)
         _, thresh = cv2.threshold(thresh, 180, 255, cv2.THRESH_BINARY)
 
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+        valid_contours = []
+        total_motion_area = 0
+
         for c in contours:
             area = cv2.contourArea(c)
             total_motion_area += area
 
-            # Kichik shovqinlarni chetlatish (area > 200)
-            if area > 200:
+            # Hayvonlar uchun minimal maydon chegarasi: area >= 700 px
+            if area >= 700:
                 (x, y, bw, bh) = cv2.boundingRect(c)
+                solidity = area / float(bw * bh)
 
-                # Kamera 20s patrul qilganda bitta ulkan blok butun kadrni qoplasa -> inkor qilish
-                if area > total_frame_area * 0.40:
+                # Shovqinlarni chetlatish: uzun ingichka simlar, simmetriyasiz qirralar (solidity < 0.28)
+                if solidity < 0.28 or bw < 18 or bh < 18:
                     continue
 
-                raw_motion = True
                 aspect_ratio = bh / float(bw)
 
-                # Hayvon va obyektlarni tasniflash
-                if area > 1600 and aspect_ratio > 1.2:
-                    label = "ODAM / SHAXS?"
+                # Hayvon va odamni tasniflash
+                if area >= 2400 and aspect_ratio > 1.25:
+                    label = "ODAM / SHAXS"
                     color = (0, 0, 240) # Qizil
-                    detected.append("Odam")
-                elif area > 600:
-                    label = "YIRIK HAYVON?"
+                    tag = "Odam"
+                elif area >= 1500:
+                    label = "YIRIK HAYVON"
                     color = (0, 140, 255) # To'q sariq (Orange)
-                    detected.append("Yirik Hayvon")
+                    tag = "Yirik Hayvon"
                 else:
-                    label = "HARAKAT?"
-                    color = (0, 225, 255) # Sariq
-                    detected.append("Harakatlanuvchi Jism")
+                    label = "HAYVON / JISM"
+                    color = (0, 220, 255) # Sariq
+                    tag = "Hayvon"
 
-                # Bounding box chizish
+                valid_contours.append((x, y, bw, bh, color, label, tag))
+
+        # Hayvon harakatini tekshirish:
+        # Hayvon odatda 1-3 ta jamlangan butun kontur bo'ladi. Agar tarqoq > 3 ta bo'lsa -> shamol / daraxt tebranishi
+        raw_motion = False
+        detected = []
+
+        if 0 < len(valid_contours) <= 3 and total_motion_area <= total_frame_area * 0.18:
+            raw_motion = True
+            for (x, y, bw, bh, color, label, tag) in valid_contours:
+                detected.append(tag)
                 cv2.rectangle(display_frame, (x, y), (x + bw, y + bh), color, 2)
                 cv2.putText(display_frame, label, (x, max(16, y - 5)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1, cv2.LINE_AA)
 
-        # Agar kadrning 45% dan ortig'i bir vaqtda qimirlasa (servo patrullash payti)
-        if total_motion_area > total_frame_area * 0.45:
-            raw_motion = False
-            detected = []
-
-        # 4. --- HARAKAT TAHLILI, TASDIQLASH VA SIRENA 5s TA'XIR (COOLDOWN) FILTRI ---
+        # 5. --- HAYVON HARAKATI DAVOMIYLIGI VA 5s SIRENA TA'XIR (COOLDOWN) FILTRI ---
         if raw_motion:
             self.motion_last_seen = now
             if self.motion_start_time == 0.0:
@@ -107,34 +153,31 @@ class SmartFarmAIDetector:
             if self.motion_duration >= self.CONFIRM_THRESHOLD_SEC:
                 self.siren_active = True
                 self.alert_active = True
-                det_str = ", ".join(self.detected_objects) if self.detected_objects else "Harakat / Hayvon"
+                det_str = ", ".join(self.detected_objects) if self.detected_objects else "Hayvon"
                 self.alert_message = f"XAVF TASDIQLANDI ({self.motion_duration:.1f}s): {det_str}!"
                 status_color = (0, 0, 200) # Qizil
-                status_text = f"[AI XAVF] TASDIQLANDI ({self.motion_duration:.1f}s) | SIRENA FAOL!"
+                status_text = f"[AI XAVF] {det_str.upper()} ({self.motion_duration:.1f}s) | SIRENA FAOL!"
             elif self.motion_duration > 0.6:
-                det_str = ", ".join(self.detected_objects) if self.detected_objects else "Obyekt"
-                self.alert_message = f"Harakat tekshirilmoqda... ({self.motion_duration:.1f}s / {self.CONFIRM_THRESHOLD_SEC:.1f}s) [{det_str}]"
+                det_str = ", ".join(self.detected_objects) if self.detected_objects else "Hayvon"
+                self.alert_message = f"Hayvon tahlil qilinmoqda... ({self.motion_duration:.1f}s / {self.CONFIRM_THRESHOLD_SEC:.1f}s) [{det_str}]"
                 status_color = (0, 130, 240) # To'q sariq
-                status_text = f"[AI TAHLIL] {self.motion_duration:.1f}s / {self.CONFIRM_THRESHOLD_SEC:.1f}s | {', '.join(detected) if detected else 'Harakat'}"
+                status_text = f"[AI TAHLIL] {self.motion_duration:.1f}s / {self.CONFIRM_THRESHOLD_SEC:.1f}s | {det_str}"
             else:
                 self.alert_message = "Tizim Tinch (Xavfsiz)"
                 status_color = (0, 140, 0) # Yashil
                 status_text = f"[AI TINCH] Xavfsiz | {time.strftime('%H:%M:%S')}"
         else:
-            # Kadrda harakat yo'q (Hayvon chiqib ketdi yoki maydon tinch)
             time_since_motion = now - self.motion_last_seen if self.motion_last_seen > 0 else 999.0
 
             if self.siren_active:
-                # Agar sirena faol bo'lsa -> hayvon ketgandan so'ng 5 soniya davomida ishlab turadi
                 if time_since_motion < self.SIREN_COOLDOWN_SEC:
                     remaining = self.SIREN_COOLDOWN_SEC - time_since_motion
                     self.siren_active = True
                     self.alert_active = True
                     self.alert_message = f"Hayvon ketdi. Sirena {remaining:.1f}s dan so'ng o'chadi..."
-                    status_color = (0, 140, 255) # To'q sariq / Amber
+                    status_color = (0, 140, 255) # Amber
                     status_text = f"[AI KUZATUV] Hayvon ketdi | Sirena o'chishi: {remaining:.1f}s"
                 else:
-                    # 5 soniya to'liq o'tdi -> Sirena o'chiriladi!
                     self.siren_active = False
                     self.alert_active = False
                     self.motion_start_time = 0.0
@@ -144,7 +187,6 @@ class SmartFarmAIDetector:
                     status_color = (0, 140, 0) # Yashil
                     status_text = f"[AI TINCH] Xavfsiz | {time.strftime('%H:%M:%S')}"
             else:
-                # Sirena oldin yoqilmagan bo'lsa
                 if time_since_motion > 1.2:
                     self.motion_start_time = 0.0
                     self.motion_duration = 0.0
@@ -154,12 +196,12 @@ class SmartFarmAIDetector:
                 status_color = (0, 140, 0) # Yashil
                 status_text = f"[AI TINCH] Xavfsiz | {time.strftime('%H:%M:%S')}"
 
-        # 5. Kadr tepasiga AI holat sarlavhasi (Banner) chizish
+        # 6. Kadr tepasiga AI holat sarlavhasi (Banner) chizish
         cv2.rectangle(display_frame, (0, 0), (w, 22), status_color, -1)
         cv2.putText(display_frame, status_text, (6, 16),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
 
-        # 6. Annotated kadrni JPEG ga kodlash
+        # 7. Annotated kadrni JPEG ga kodlash
         ret, out_jpeg = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 78])
         if ret:
             return out_jpeg.tobytes(), self.alert_active, self.alert_message, self.detected_objects, self.siren_active
