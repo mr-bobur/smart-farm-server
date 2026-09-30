@@ -793,25 +793,44 @@ void setup() {
   Serial.printf("[SETUP] Serial2 (Radar): RX=GPIO %d, TX=GPIO %d @ 256000 baud.\n", RADAR_RX_PIN, RADAR_TX_PIN);
   Serial2.begin(256000, SERIAL_8N1, RADAR_RX_PIN, RADAR_TX_PIN);
 
-  // 5. T-HaLow TX-AH-R900P Moduli (UART0: GPIO 5 RX, GPIO 4 TX @ 115200 baud)
-  Serial.printf("[SETUP] T-HaLow TX-AH: RX=GPIO %d, TX=GPIO %d @ 115200 baud.\n", HALOW_RX_PIN, HALOW_TX_PIN);
-  SerialHalow.begin(115200, SERIAL_8N1, HALOW_RX_PIN, HALOW_TX_PIN);
-  delay(40);
-  SerialHalow.print("AT\r\n");
-  delay(120);
+  // 5. T-HaLow TX-AH-R900P Modulini apparat tekshirish
+  Serial.printf("[SETUP] T-HaLow TX-AH zondlash (GPIO 5 va 4 @ 115200 baud)...\n");
+  int halowRx = 5, halowTx = 4;
+  SerialHalow.begin(115200, SERIAL_8N1, halowRx, halowTx);
+  delay(60);
+  while (SerialHalow.available()) SerialHalow.read();
+  SerialHalow.print("AT+MAC_ADDR=?\r\n");
+  delay(150);
+  String hResp = "";
   if (SerialHalow.available()) {
-    String resp = SerialHalow.readString();
-    resp.trim();
-    if (resp.indexOf("OK") >= 0) {
-      halowDetected = true;
-      halowInfo = "TX-AH Faol (AT OK)";
-      Serial.println("[OK HALOW] Bortdagi TX-AH-R900P HaLow moduli muvaffaqiyatli aniqlandi!");
-    } else {
-      halowInfo = resp.substring(0, 24);
-      Serial.printf("[HALOW] Modul javobi: %s\n", halowInfo.c_str());
-    }
+    hResp = SerialHalow.readString();
+  }
+  if (hResp.indexOf("OK") >= 0 || hResp.indexOf("+") >= 0) {
+    halowDetected = true;
+    hResp.trim();
+    halowInfo = "Faol (" + hResp.substring(0, 18) + ")";
+    Serial.printf("[OK HALOW] RX=%d, TX=%d da HaLow moduli topildi: %s\n", halowRx, halowTx, hResp.c_str());
   } else {
-    Serial.println("[HALOW] TX-AH modulidan javob kelmadi (Kutish rejimida).");
+    // Zaxira pinlarni tekshirish (RX=4, TX=5)
+    SerialHalow.end();
+    delay(50);
+    halowRx = 4; halowTx = 5;
+    SerialHalow.begin(115200, SERIAL_8N1, halowRx, halowTx);
+    delay(60);
+    while (SerialHalow.available()) SerialHalow.read();
+    SerialHalow.print("AT+MAC_ADDR=?\r\n");
+    delay(150);
+    if (SerialHalow.available()) {
+      hResp = SerialHalow.readString();
+    }
+    if (hResp.indexOf("OK") >= 0 || hResp.indexOf("+") >= 0) {
+      halowDetected = true;
+      hResp.trim();
+      halowInfo = "Faol (" + hResp.substring(0, 18) + ")";
+      Serial.printf("[OK HALOW] Zaxira RX=%d, TX=%d da HaLow moduli topildi: %s\n", halowRx, halowTx, hResp.c_str());
+    } else {
+      Serial.println("[HALOW] Modul javob bermadi (Transparent TTL yoki aloqa kutilmoqda).");
+    }
   }
 
   // 6. OV2640 Kamera (8MB OPI PSRAM)
