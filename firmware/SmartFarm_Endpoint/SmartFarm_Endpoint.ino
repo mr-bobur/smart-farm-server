@@ -87,14 +87,15 @@
 WiFiMulti wifiMulti;
 
 const char* server_urls[] = {
-  "http://170.168.60.245:8000/api/telemetry" // Yagona faol tashqi server
+  "http://10.190.174.32/relay_telemetry",     // 1-ustuvor: Mahalliy Gateway
+  "http://170.168.60.245:8000/api/telemetry" // 2-ustuvor: To'g'ridan-to'g'ri tashqi server
 };
+const int num_server_urls = 2;
+int activeServerIdx = 0;
 
 const char* upload_frame_urls[] = {
-  "http://170.168.60.245:8000/api/upload_frame" // Yagona faol video upload
+  "http://170.168.60.245:8000/api/upload_frame"
 };
-const int num_server_urls = 1;
-int activeServerIdx = 0;
 
 TaskHandle_t streamTaskHandle = NULL;
 unsigned long framesUploaded = 0;
@@ -227,6 +228,24 @@ int gpsSatsVisible = 0;
 HardwareSerial SerialHalow(0);
 bool halowDetected = false;
 String halowInfo = "Kutilmoqda...";
+unsigned long lastHalowCheck = 0;
+
+String sendHalowCommand(String cmd) {
+  cmd.replace("\r", "");
+  cmd.replace("\n", "");
+  cmd += "\r\n";
+  while (SerialHalow.available()) SerialHalow.read();
+  SerialHalow.print(cmd);
+  unsigned long start = millis();
+  String resp = "";
+  while (millis() - start < 600) {
+    while (SerialHalow.available()) {
+      resp += (char)SerialHalow.read();
+    }
+    delay(10);
+  }
+  return resp;
+}
 
 // Diagnostika va Statistika
 unsigned long lastTelemetrySend = 0;
@@ -422,12 +441,27 @@ static esp_err_t siren_handler(httpd_req_t *req) {
   return ESP_FAIL;
 }
 
+static esp_err_t halow_handler(httpd_req_t *req) {
+  char buf[128];
+  size_t buf_len = sizeof(buf);
+  char cmd_param[64] = "AT+CONN_STATE";
+  if (httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
+    httpd_query_key_value(buf, "cmd", cmd_param, sizeof(cmd_param));
+  }
+  String resp = sendHalowCommand(String(cmd_param));
+  String out = "=== Endpoint T-HaLow AT ===\nCMD: " + String(cmd_param) + "\nRESP:\n" + resp + "\n";
+  httpd_resp_set_type(req, "text/plain");
+  httpd_resp_send(req, out.c_str(), out.length());
+  return ESP_OK;
+}
+
 static esp_err_t index_handler(httpd_req_t *req) {
   String html = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Endpoint Diagnostika</title></head>";
   html += "<body style='background:#111;color:#eee;font-family:sans-serif;padding:25px;'>";
   html += "<h2>Aqlli Ferma - Endpoint Node Diagnostika</h2>";
   html += "<p><b>IP Manzil:</b> " + WiFi.localIP().toString() + "</p>";
   html += "<p><b>mmWave Radar (HLK-LD2410C):</b> " + String(radarPresence ? "Nishon Aniqlandi!" : "Tinch") + " | Masofa: " + String(radarDistanceCm) + " sm | OUT (IO45): " + String(radarOutVal) + " (RX:7, TX:6)</p>";
+  html += "<p><b>T-HaLow (Sub-1GHz):</b> " + halowInfo + "</p>";
   html += "<p><b>Ovoz / Sirena (GPIO 15):</b> " + String(sirenActive ? "YOQILGAN (Xavf/Qo'rqitish)" : "O'chiq (Tinch)") + "</p>";
   html += "<p><b>Batareya:</b> " + String(batteryVoltage, 2) + " V (" + String(batteryPercent) + " %)</p>";
   html += "<p><b>GPS (GPIO 40/41):</b> " + String(gpsLatitude, 6) + ", " + String(gpsLongitude, 6) + "</p>";
@@ -435,6 +469,7 @@ static esp_err_t index_handler(httpd_req_t *req) {
   html += "<p><b>Sirena:</b> " + String(sirenActive ? "YOQILGAN (Servo to'xtatilgan)" : "O'chiq") + "</p>";
   html += "<p><a href='/capture' style='color:#38bdf8'>Fotosurat olish (/capture)</a></p>";
   html += "<p><a href=':81/stream' style='color:#34d399'>Video Oqimi (Port 81 /stream)</a></p>";
+  html += "<p><a href='/halow' style='color:#fbbf24'>T-HaLow AT Test (/halow?cmd=AT+CONN_STATE)</a></p>";
   html += "</body></html>";
   httpd_resp_send(req, html.c_str(), html.length());
   return ESP_OK;
@@ -450,6 +485,7 @@ void startHttpServers() {
   httpd_uri_t servo_uri   = { .uri = "/servo",    .method = HTTP_GET, .handler = servo_handler,   .user_ctx = NULL };
   httpd_uri_t siren_uri   = { .uri = "/siren",    .method = HTTP_GET, .handler = siren_handler,   .user_ctx = NULL };
   httpd_uri_t flip_uri    = { .uri = "/flip",     .method = HTTP_GET, .handler = flip_handler,    .user_ctx = NULL };
+  httpd_uri_t halow_uri   = { .uri = "/halow",    .method = HTTP_GET, .handler = halow_handler,   .user_ctx = NULL };
 
   if (httpd_start(&camera_httpd, &config) == ESP_OK) {
     httpd_register_uri_handler(camera_httpd, &index_uri);
@@ -457,6 +493,7 @@ void startHttpServers() {
     httpd_register_uri_handler(camera_httpd, &servo_uri);
     httpd_register_uri_handler(camera_httpd, &siren_uri);
     httpd_register_uri_handler(camera_httpd, &flip_uri);
+    httpd_register_uri_handler(camera_httpd, &halow_uri);
     Serial.println("[OK HTTP] Port 80 Web Server & REST API faol.");
   }
 
@@ -742,13 +779,18 @@ void streamUploadTask(void *pvParameters) {
           String resp = http.getString();
           if (resp.indexOf("\"siren_active\":true") >= 0) setSiren(true);
           else if (resp.indexOf("\"siren_active\":false") >= 0) setSiren(false);
+          vTaskDelay(pdMS_TO_TICKS(10));
         } else {
           http.end(); // Xatolik bo'lsa ulanishni qayta yangilash
+          vTaskDelay(pdMS_TO_TICKS(1500)); // Serverga ulanib bo'lmasa tarmoqni bo'sh qoldirish
         }
         esp_camera_fb_return(fb);
+      } else {
+        vTaskDelay(pdMS_TO_TICKS(100));
       }
+    } else {
+      vTaskDelay(pdMS_TO_TICKS(500));
     }
-    vTaskDelay(pdMS_TO_TICKS(10)); // Maksimal tezlik (10ms kechikish)
   }
 }
 
@@ -800,37 +842,63 @@ void setup() {
   delay(60);
   while (SerialHalow.available()) SerialHalow.read();
   SerialHalow.print("AT+MAC_ADDR=?\r\n");
-  delay(150);
+  unsigned long hSt = millis();
   String hResp = "";
-  if (SerialHalow.available()) {
-    hResp = SerialHalow.readString();
+  while (millis() - hSt < 600) {
+    while (SerialHalow.available()) hResp += (char)SerialHalow.read();
+    delay(10);
   }
-  if (hResp.indexOf("OK") >= 0 || hResp.indexOf("+") >= 0) {
+  if (hResp.indexOf("mac addr=") >= 0 || hResp.indexOf("OK") >= 0 || hResp.indexOf("+") >= 0) {
     halowDetected = true;
-    hResp.trim();
-    halowInfo = "Faol (" + hResp.substring(0, 18) + ")";
-    Serial.printf("[OK HALOW] RX=%d, TX=%d da HaLow moduli topildi: %s\n", halowRx, halowTx, hResp.c_str());
+    int macIdx = hResp.indexOf("mac addr=");
+    if (macIdx >= 0) {
+      halowInfo = hResp.substring(macIdx + 9, macIdx + 26);
+    } else {
+      halowInfo = "Faol (" + hResp.substring(0, 18) + ")";
+    }
+    Serial.printf("[OK HALOW] RX=%d, TX=%d da HaLow moduli topildi: %s\n", halowRx, halowTx, halowInfo.c_str());
   } else {
     // Zaxira pinlarni tekshirish (RX=4, TX=5)
     SerialHalow.end();
-    delay(50);
+    delay(40);
     halowRx = 4; halowTx = 5;
     SerialHalow.begin(115200, SERIAL_8N1, halowRx, halowTx);
     delay(60);
     while (SerialHalow.available()) SerialHalow.read();
     SerialHalow.print("AT+MAC_ADDR=?\r\n");
-    delay(150);
-    if (SerialHalow.available()) {
-      hResp = SerialHalow.readString();
+    hSt = millis();
+    hResp = "";
+    while (millis() - hSt < 600) {
+      while (SerialHalow.available()) hResp += (char)SerialHalow.read();
+      delay(10);
     }
-    if (hResp.indexOf("OK") >= 0 || hResp.indexOf("+") >= 0) {
+    if (hResp.indexOf("mac addr=") >= 0 || hResp.indexOf("OK") >= 0 || hResp.indexOf("+") >= 0) {
       halowDetected = true;
-      hResp.trim();
-      halowInfo = "Faol (" + hResp.substring(0, 18) + ")";
-      Serial.printf("[OK HALOW] Zaxira RX=%d, TX=%d da HaLow moduli topildi: %s\n", halowRx, halowTx, hResp.c_str());
+      int macIdx = hResp.indexOf("mac addr=");
+      if (macIdx >= 0) {
+        halowInfo = hResp.substring(macIdx + 9, macIdx + 26);
+      } else {
+        halowInfo = "Faol (" + hResp.substring(0, 18) + ")";
+      }
+      Serial.printf("[OK HALOW] Zaxira RX=%d, TX=%d da HaLow moduli topildi: %s\n", halowRx, halowTx, halowInfo.c_str());
     } else {
       Serial.println("[HALOW] Modul javob bermadi (Transparent TTL yoki aloqa kutilmoqda).");
     }
+  }
+
+  // T-HaLow ni avtomatik STA (Mijoz) rejimiga sozlash va AP ga ulanish
+  if (halowDetected) {
+    Serial.println("[HALOW STA] Endpoint T-HaLow moduli STA (Mijoz) rejimiga sozlanmoqda...");
+    sendHalowCommand("AT+MODE=sta");
+    delay(150);
+    sendHalowCommand("AT+SSID=SmartFarm");
+    delay(100);
+    sendHalowCommand("AT+PRI_CHAN=3");
+    delay(100);
+    sendHalowCommand("AT+BSS_BW=8");
+    delay(100);
+    halowInfo = "STA Qidirmoqda (SSID: SmartFarm, 908MHz)";
+    Serial.println("[HALOW STA] STA muvaffaqiyatli sozlandi va 'SmartFarm' AP ga ulanish boshlandi.");
   }
 
   // 6. OV2640 Kamera (8MB OPI PSRAM)
@@ -894,6 +962,19 @@ void loop() {
 
   // Hayvon qo'rqitish sirenasini modulyatsiya qilish
   updateSirenAudio();
+
+  // Har 4 soniyada T-HaLow ulanish holatini tekshirish
+  if (millis() - lastHalowCheck > 4000) {
+    lastHalowCheck = millis();
+    if (halowDetected) {
+      String cState = sendHalowCommand("AT+CONN_STATE");
+      if (cState.indexOf("+CONNECT") >= 0) {
+        halowInfo = "ULANGAN (+CONNECT, 908MHz)";
+      } else {
+        halowInfo = "QIDIRILMOQDA (+DISCONNECT)";
+      }
+    }
+  }
 
   if (millis() - lastSensorRead > 1000) {
     lastSensorRead = millis();

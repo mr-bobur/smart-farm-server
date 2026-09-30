@@ -49,6 +49,7 @@ HardwareSerial SerialHalow(0);
 
 bool halowDetected = false;
 String halowInfo = "Kutilmoqda...";
+unsigned long lastHalowCheck = 0;
 unsigned long lastHeartbeatSend = 0;
 unsigned long packetsRelayed = 0;
 int lastHeartbeatHttpCode = 0;
@@ -154,6 +155,21 @@ void setup() {
     } else {
       Serial.println("[HALOW] Modul AT buyruqqa darhol javob bermadi (Transparent TTL / Kutilmoqda).");
     }
+  }
+
+  // T-HaLow ni avtomatik AP (Master) rejimiga sozlash
+  if (halowDetected) {
+    Serial.println("[HALOW AP] Gateway T-HaLow moduli AP (Master) rejimiga sozlanmoqda...");
+    sendHalowCommand("AT+MODE=ap");
+    delay(150);
+    sendHalowCommand("AT+SSID=SmartFarm");
+    delay(100);
+    sendHalowCommand("AT+PRI_CHAN=3");
+    delay(100);
+    sendHalowCommand("AT+BSS_BW=8");
+    delay(100);
+    halowInfo = "AP Faol (SSID: SmartFarm, 908MHz)";
+    Serial.println("[HALOW AP] AP muvaffaqiyatli sozlandi (SSID: SmartFarm, 908MHz, BW: 8MHz).");
   }
 
   // 2. Wi-Fi ga Ulanish
@@ -359,6 +375,19 @@ void setup() {
 
 void loop() {
   gatewayServer.handleClient();
+
+  // Har 4 soniyada T-HaLow stansiyalar sonini yangilash
+  if (millis() - lastHalowCheck > 4000) {
+    lastHalowCheck = millis();
+    if (halowDetected) {
+      String staInfo = sendHalowCommand("AT+STA_INFO=?");
+      if (staInfo.indexOf("sta_cnt=") >= 0) {
+        int idx = staInfo.indexOf("sta_cnt=");
+        char cnt = staInfo.charAt(idx + 8);
+        halowInfo = "AP Faol (SSID: SmartFarm, 908MHz) | Ulangan: " + String(cnt) + " ta";
+      }
+    }
+  }
 
   // Har 5 soniyada serverga Heartbeat yuborish
   if (millis() - lastHeartbeatSend > 5000) {
