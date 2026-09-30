@@ -258,32 +258,47 @@
     <!-- Column 3: Sensors, Telemetry & Live GPS Map -->
     <div class="flex flex-col gap-6">
 
-      <!-- Telemetry Cards -->
+      <!-- Muhofaza & Datchiklar Cards -->
       <div class="glass-card rounded-2xl p-5">
         <h3 class="text-sm font-semibold text-gray-200 mb-4 flex items-center justify-between">
           <span class="flex items-center gap-2">
-            <i class="fa-solid fa-chart-pie text-emerald-400"></i>
-            Dala Datchiklari
+            <i class="fa-solid fa-shield-halved text-cyan-400"></i>
+            Muhofaza & Datchiklar
           </span>
-          <span class="text-[10px] px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800">
-            HTU21 I2C • ADC2 (IO15)
+          <span class="text-[10px] px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
+            mmWave 24GHz • AI Vision • Audio
           </span>
         </h3>
 
-        <div class="grid grid-cols-2 gap-3">
-          <!-- Soil Moisture (Analog - GPIO 15) -->
-          <div class="bg-gray-800/60 p-3.5 rounded-xl border border-gray-700/50 flex flex-col justify-between">
-            <span class="text-xs text-gray-400 flex items-center gap-1.5">
-              <i class="fa-solid fa-droplet text-blue-400"></i> Tuproq Namligi
-            </span>
-            <div class="mt-2 flex items-baseline gap-1">
-              <span id="soilVal" class="text-2xl font-bold text-blue-300 font-mono">--</span>
-              <span class="text-xs text-gray-400">%</span>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <!-- HLK-LD2410C 24GHz mmWave Radar (Bosh Karta) -->
+          <div class="col-span-1 md:col-span-2 bg-gradient-to-r from-purple-950/40 via-indigo-950/30 to-gray-800/60 p-4 rounded-xl border border-purple-500/30 flex flex-col justify-between">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="w-11 h-11 rounded-xl bg-purple-950 text-purple-300 flex items-center justify-center border border-purple-500/40 text-xl shadow-lg shadow-purple-900/40">
+                  <i class="fa-solid fa-radar animate-spin-slow"></i>
+                </div>
+                <div>
+                  <span class="text-xs text-gray-400 block font-medium">HLK-LD2410C mmWave Radar (IO44/43/39)</span>
+                  <span id="radarStatusText" class="text-base font-bold text-purple-300">Tinch (Nishon yo'q)</span>
+                </div>
+              </div>
+              <div class="text-right">
+                <span class="text-xs text-gray-400 block">Nishon Masofasi:</span>
+                <span id="radarDistText" class="text-xl font-mono font-bold text-cyan-300">-- sm</span>
+              </div>
             </div>
-            <div class="w-full bg-gray-700 h-1.5 rounded-full mt-2 overflow-hidden">
-              <div id="soilBar" class="bg-blue-500 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
+            <!-- Masofa Bar -->
+            <div class="mt-3">
+              <div class="flex justify-between text-[10px] text-gray-400 font-mono mb-1">
+                <span>0 m (Yaqin)</span>
+                <span>3 m</span>
+                <span>6 m (Maksimal)</span>
+              </div>
+              <div class="w-full bg-gray-700/70 h-2 rounded-full overflow-hidden">
+                <div id="radarDistBar" class="bg-gradient-to-r from-cyan-500 to-purple-500 h-full rounded-full transition-all duration-300" style="width: 0%"></div>
+              </div>
             </div>
-            <span id="soilRawVal" class="text-[10px] text-gray-400 mt-1 font-mono">Analog ADC (IO15): --</span>
           </div>
 
           <!-- Batareya Quvvati (GPIO 3) -->
@@ -298,47 +313,20 @@
             <div class="w-full bg-gray-700 h-1.5 rounded-full mt-2 overflow-hidden">
               <div id="battBar" class="bg-emerald-500 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
             </div>
-            <span id="battVoltVal" class="text-[10px] text-gray-400 mt-1 font-mono">Kuchlanish: -- V</span>
+            <span id="battVoltVal" class="text-[10px] text-gray-400 mt-1 font-mono">Kuchlanish: -- V (VBAT-DET)</span>
           </div>
 
-          <!-- HTU21 Havo Harorati -->
+          <!-- Ovoz / Karnay Tizimi Holati -->
           <div class="bg-gray-800/60 p-3.5 rounded-xl border border-gray-700/50 flex flex-col justify-between">
             <span class="text-xs text-gray-400 flex items-center gap-1.5">
-              <i class="fa-solid fa-temperature-three-quarters text-orange-400"></i> Havo Harorati
+              <i class="fa-solid fa-bullhorn text-amber-400"></i> Karnay / Tovush Rejimi
             </span>
             <div class="mt-2 flex items-baseline gap-1">
-              <span id="tempVal" class="text-2xl font-bold text-orange-300 font-mono">--</span>
-              <span class="text-xs text-gray-400">°C</span>
+              <span id="audioModeText" class="text-lg font-bold text-amber-300 font-mono">Avto (3s Tahlil)</span>
             </div>
-            <span class="text-[10px] text-emerald-400 mt-1 font-mono">HTU21D (I2C)</span>
-          </div>
-
-          <!-- HTU21 Havo Namligi -->
-          <div class="bg-gray-800/60 p-3.5 rounded-xl border border-gray-700/50 flex flex-col justify-between">
-            <span class="text-xs text-gray-400 flex items-center gap-1.5">
-              <i class="fa-solid fa-cloud text-teal-400"></i> Havo Namligi
-            </span>
-            <div class="mt-2 flex items-baseline gap-1">
-              <span id="humVal" class="text-2xl font-bold text-teal-300 font-mono">--</span>
-              <span class="text-xs text-gray-400">%</span>
-            </div>
-            <span class="text-[10px] text-teal-400 mt-1 font-mono">HTU21D (I2C)</span>
-          </div>
-
-          <!-- HLK-LD2410C Radar (GPIO 44/43) -->
-          <div class="col-span-2 bg-gray-800/60 p-3.5 rounded-xl border border-gray-700/50 flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-xl bg-purple-950/80 text-purple-400 flex items-center justify-center border border-purple-500/30 text-lg">
-                <i class="fa-solid fa-radar"></i>
-              </div>
-              <div>
-                <span class="text-xs text-gray-400 block">HLK-LD2410C Radar (IO44/43):</span>
-                <span id="radarStatusText" class="text-sm font-bold text-purple-300">Tinch (Nishon yo'q)</span>
-              </div>
-            </div>
-            <div class="text-right">
-              <span class="text-[10px] text-gray-400 block">Nishon Masofasi:</span>
-              <span id="radarDistText" class="text-sm font-mono font-bold text-cyan-300">-- sm</span>
+            <div class="mt-2 text-[10px] text-gray-400 flex items-center justify-between">
+              <span>Chastota: <b class="text-amber-300">1400 - 3200 Hz</b></span>
+              <span id="audioStatusBadge" class="px-2 py-0.5 rounded bg-gray-700 text-gray-300">Sukut</span>
             </div>
           </div>
         </div>
@@ -460,22 +448,13 @@
       if (data.telemetry) {
         const t = data.telemetry;
 
-        // Soil
-        if (t.soil !== undefined) {
-          document.getElementById('soilVal').innerText = t.soil;
-          document.getElementById('soilBar').style.width = `${Math.min(100, Math.max(0, t.soil))}%`;
-        }
-        if (t.soil_raw !== undefined) {
-          document.getElementById('soilRawVal').innerText = `Analog ADC (IO15): ${t.soil_raw}`;
-        }
-
-        // Battery
+        // Batareya (VBAT-DET)
         if (t.battery !== undefined) {
           const b = Math.min(100, Math.max(0, Math.round(t.battery)));
           const v = t.battery_voltage ? parseFloat(t.battery_voltage).toFixed(2) : '4.20';
           document.getElementById('battVal').innerText = b;
           document.getElementById('battBar').style.width = `${b}%`;
-          document.getElementById('battVoltVal').innerText = `Kuchlanish: ${v} V`;
+          document.getElementById('battVoltVal').innerText = `Kuchlanish: ${v} V (VBAT-DET)`;
           document.getElementById('topBattText').innerText = `${b}% (${v}V)`;
           document.getElementById('endpointBatt').innerText = `${b}% (${v}V)`;
 
@@ -497,29 +476,29 @@
           }
         }
 
-        // HTU21 Temperature & Humidity
-        if (t.temperature !== undefined) document.getElementById('tempVal').innerText = t.temperature;
-        if (t.humidity !== undefined) document.getElementById('humVal').innerText = t.humidity;
-
-        // Radar HLK-LD2410C
+        // mmWave Radar HLK-LD2410C
         if (t.radar !== undefined) {
           const rText = document.getElementById('radarStatusText');
           if (t.radar === 1) {
             rText.innerText = "Harakatlanuvchi nishon!";
-            rText.className = "text-sm font-bold text-amber-400 animate-pulse";
+            rText.className = "text-base font-bold text-amber-400 animate-pulse";
           } else if (t.radar === 2) {
-            rText.innerText = "Qo'zg'almas nishon bor";
-            rText.className = "text-sm font-bold text-indigo-400";
+            rText.innerText = "Qo'zg'almas nishon mavjud";
+            rText.className = "text-base font-bold text-indigo-400";
           } else if (t.radar === 3) {
             rText.innerText = "Harakat va mavjudlik aniqlandi!";
-            rText.className = "text-sm font-bold text-rose-400 animate-pulse";
+            rText.className = "text-base font-bold text-rose-400 animate-pulse";
           } else {
             rText.innerText = "Tinch (Nishon yo'q)";
-            rText.className = "text-sm font-bold text-purple-300";
+            rText.className = "text-base font-bold text-purple-300";
           }
         }
         if (t.radar_distance !== undefined) {
-          document.getElementById('radarDistText').innerText = t.radar_distance > 0 ? `${t.radar_distance} sm` : '--';
+          const dist = parseInt(t.radar_distance) || 0;
+          document.getElementById('radarDistText').innerText = dist > 0 ? `${dist} sm` : '-- sm';
+          const pct = Math.min(100, Math.max(0, Math.round((dist / 600.0) * 100)));
+          const rBar = document.getElementById('radarDistBar');
+          if (rBar) rBar.style.width = `${pct}%`;
         }
 
         // GPS
@@ -709,12 +688,21 @@
       sirenActive = active;
       const btn = document.getElementById('sirenBtn');
       const btnText = document.getElementById('sirenBtnText');
+      const badge = document.getElementById('audioStatusBadge');
       if (sirenActive) {
         btn.className = "flex-grow py-3 px-4 rounded-xl text-sm font-bold uppercase tracking-wider transition-all duration-300 flex items-center justify-center gap-2 bg-red-600 text-white shadow-lg shadow-red-600/50 animate-pulse";
         btnText.innerText = "SIRENA YOQILGAN! (O'chirish)";
+        if (badge) {
+          badge.className = "px-2 py-0.5 rounded bg-red-950 text-red-300 border border-red-800 animate-pulse font-bold";
+          badge.innerText = "FAOL (Qo'rqitmoqda)";
+        }
       } else {
         btn.className = "flex-grow py-3 px-4 rounded-xl text-sm font-bold uppercase tracking-wider transition-all duration-300 flex items-center justify-center gap-2 bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white shadow-lg shadow-red-900/30";
         btnText.innerText = "Sirena Yoqish (Manual)";
+        if (badge) {
+          badge.className = "px-2 py-0.5 rounded bg-gray-700 text-gray-300";
+          badge.innerText = "Sukut";
+        }
       }
     }
 

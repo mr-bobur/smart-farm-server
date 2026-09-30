@@ -18,20 +18,17 @@
   4. Hayvon qo'rqituvchi sirena: 1400Hz - 3200Hz yirtqich/tashvish modulyatsiyasi
   5. Kamera: 180° ga to'g'ri o'girilgan (vflip=0, hmirror=0) va /flip API faol
   6. Pinlar:
-     - Radar: RX=GPIO 44, TX=GPIO 43, OUT=GPIO 39
-     - GPS: RX=GPIO 40, TX=GPIO 41
-     - Tuproq: GPIO 15 (ADC2_CH4)
-     - HTU21: GPIO 7 (SDA), GPIO 6 (SCL)
-     - Servo: GPIO 46 (Channel 0)
-     - Sirena: GPIO 45 (Channel 2)
+     - mmWave Radar: RX=GPIO 44, TX=GPIO 43, OUT=GPIO 39 (HLK-LD2410C)
+     - Kamera: J4 sloti (OV2640 VGA 640x480)
+     - Sirena / Kalonka: GPIO 45 (Channel 2 Audio Tone 1400-3200Hz)
+     - Servo: GPIO 46 (Channel 0 Pan 45°-135°)
+     - GPS: RX=GPIO 40, TX=GPIO 41 (NEO-6M)
      - Batareya: GPIO 3 (VBAT-DET)
-     - Kamera: J4 sloti (OV2640)
+     * Tuproq va Harorat/Namlik sensorlari olib tashlangan
   =============================================================================
 */
 
 #include <Arduino.h>
-#include <Wire.h>
-#include <Adafruit_HTU21DF.h>
 #include "esp_camera.h"
 #include <WiFi.h>
 #include <WiFiMulti.h>
@@ -40,7 +37,6 @@
 
 // ---------------------- PIN DEFINITIONS ----------------------
 #define BOARD_LED        38
-#define SOIL_PIN         15   // Tuproq Sensori (Analog AO - ADC2_CH4)
 #define SERVO_PIN        46   // 180° Pan Servo (LEDC Channel 0)
 #define BATT_ADC_PIN     3    // VBAT-DET (Bortdagi 100k/100k bo'luvchi)
 #define SIREN_PIN        45   // Karnay / Sirena drayveri (LEDC Channel 2)
@@ -49,14 +45,10 @@
 #define GPS_RX_PIN       40   // Serial1 RX: GPS TX dan o'qish (9600 baud)
 #define GPS_TX_PIN       41   // Serial1 TX: GPS RX ga (9600 baud)
 
-// RADAR: TX, RX va yangi alohida OUT pini
+// mmWave RADAR: TX, RX va yangi alohida OUT pini (HLK-LD2410C)
 #define RADAR_RX_PIN     44   // Serial2 RX: Radar TX dan o'qish (256000 baud)
 #define RADAR_TX_PIN     43   // Serial2 TX: Radar RX ga
 #define RADAR_OUT_PIN    39   // HLK-LD2410C OUT raqamli kirish (Header 2, Pin 10)
-
-// I2C Pinlari (LilyGO T-Halow rasmiy shinalari)
-#define BOARD_I2C_SDA    7
-#define BOARD_I2C_SCL    6
 
 // LilyGO T-Halow Rasmiy Kamera Pinlari (J4 Sloti)
 #define CAMERA_PIN_PWDN     (-1)
@@ -105,8 +97,6 @@ int lastUploadHttpCode = 0;
 
 httpd_handle_t camera_httpd = NULL;
 httpd_handle_t stream_httpd = NULL;
-Adafruit_HTU21DF htu = Adafruit_HTU21DF();
-bool htuFound = false;
 bool cameraFound = false;
 
 // ---------------------- SIRENA NAZORATI ----------------------
@@ -203,12 +193,7 @@ void updateServoPatrol() {
   }
 }
 
-// ---------------------- DALA SENSORLARI KO'RSATKICHLARI ------
-float temperature = 26.5;
-float humidity = 45.0;
-int soilPercent = 65;
-int soilRaw = 2100;
-
+// ---------------------- DALA KO'RSATKICHLARI -----------------
 // Batareya Ko'rsatkichlari
 float batteryVoltage = 4.15;
 int batteryPercent = 95;
@@ -423,9 +408,8 @@ static esp_err_t index_handler(httpd_req_t *req) {
   html += "<body style='background:#111;color:#eee;font-family:sans-serif;padding:25px;'>";
   html += "<h2>Aqlli Ferma - Endpoint Node Diagnostika</h2>";
   html += "<p><b>IP Manzil:</b> " + WiFi.localIP().toString() + "</p>";
-  html += "<p><b>HTU21 Harorat:</b> " + String(temperature, 1) + " &deg;C</p>";
-  html += "<p><b>HTU21 Namlik:</b> " + String(humidity, 1) + " %</p>";
-  html += "<p><b>Tuproq Namligi (GPIO 15):</b> " + String(soilPercent) + " % (ADC: " + String(soilRaw) + ")</p>";
+  html += "<p><b>mmWave Radar (HLK-LD2410C):</b> " + String(radarPresence ? "Nishon Aniqlandi!" : "Tinch") + " | Masofa: " + String(radarDistanceCm) + " sm | OUT (IO39): " + String(radarOutVal) + "</p>";
+  html += "<p><b>Ovoz / Sirena:</b> " + String(sirenActive ? "YOQILGAN (Xavf/Qo'rqitish)" : "O'chiq (Tinch)") + "</p>";
   html += "<p><b>Batareya:</b> " + String(batteryVoltage, 2) + " V (" + String(batteryPercent) + " %)</p>";
   html += "<p><b>Radar (GPIO 44/43/39):</b> " + String(radarPresence ? "Harakat bor" : "Tinch") + " | Masofa: " + String(radarDistanceCm) + " sm | OUT: " + String(radarOutVal) + "</p>";
   html += "<p><b>GPS (GPIO 40/41):</b> " + String(gpsLatitude, 6) + ", " + String(gpsLongitude, 6) + "</p>";
@@ -475,25 +459,7 @@ void startHttpServers() {
 
 // ---------------------- SENSORS READING ----------------------
 void readSensors() {
-  // 1. HTU21 (I2C) Harorat va Namlik
-  if (htuFound) {
-    float t = htu.readTemperature();
-    float h = htu.readHumidity();
-    if (!isnan(t) && t > -30.0 && t < 90.0) temperature = t;
-    if (!isnan(h) && h >= 0.0 && h <= 100.0) humidity = h;
-  }
-
-  // 2. Tuproq Namligi (Analog ADC - GPIO 15)
-  uint32_t soilSum = 0;
-  for (int i = 0; i < 8; i++) {
-    soilSum += analogRead(SOIL_PIN);
-    delay(2);
-  }
-  soilRaw = soilSum / 8;
-  // Kalibratsiya: Havoda quruq ~3400-4095, Suvda nam ~1400
-  soilPercent = map(constrain(soilRaw, 1400, 3400), 3400, 1400, 0, 100);
-
-  // 3. Batareya Quvvati (VBAT-DET - GPIO 3)
+  // 1. Batareya Quvvati (VBAT-DET - GPIO 3)
   uint32_t battSum = 0;
   for (int i = 0; i < 8; i++) {
     battSum += analogRead(BATT_ADC_PIN);
@@ -567,10 +533,6 @@ void readSensors() {
 void sendTelemetry() {
   if (WiFi.status() == WL_CONNECTED) {
     String json = "{";
-    json += "\"soil\":" + String(soilPercent) + ",";
-    json += "\"soil_raw\":" + String(soilRaw) + ",";
-    json += "\"temperature\":" + String(temperature, 1) + ",";
-    json += "\"humidity\":" + String(humidity, 1) + ",";
     json += "\"battery\":" + String(batteryPercent) + ",";
     json += "\"battery_voltage\":" + String(batteryVoltage, 2) + ",";
     json += "\"radar\":" + String(radarPresence) + ",";
@@ -606,24 +568,22 @@ void sendTelemetry() {
 
 // ---------------------- SERIAL MONITOR LOGGER ----------------
 void printPeriodicDiagnostics() {
-  Serial.println("\n+-------------------------------------------------------------+");
-  Serial.printf ("| [DIAGNOSTIKA] AQLLI FERMA TELEMETRIYA  (Paket #%-5lu)       |\n", telemetryPacketsSent);
-  Serial.println("+-------------------------------------------------------------+");
-  Serial.printf ("| HTU21 Harorat : %5.1f C   |  HTU21 Namlik : %5.1f %%          |\n", temperature, humidity);
-  Serial.printf ("| Tuproq (GPIO15): %3d %%   (Analog ADC: %-4d)             |\n", soilPercent, soilRaw);
-  Serial.printf ("| Batareya (IO3): %5.2f V   (Quvvat: %3d %%)                |\n", batteryVoltage, batteryPercent);
-  
   String rStatus = "Tinch";
   if (radarPresence == 1) rStatus = "Harakat!";
   else if (radarPresence == 2) rStatus = "Qo'zg'almas";
   else if (radarPresence == 3) rStatus = "Harakat+Mavjud";
-  Serial.printf ("| Radar(44/43/39): %-14s | Masofa: %3d sm (OUT:%d)   |\n", rStatus.c_str(), radarDistanceCm, radarOutVal);
+
+  Serial.println("\n+-------------------------------------------------------------+");
+  Serial.printf ("| [DIAGNOSTIKA] AQLLI FERMA MUHOFAZA TIZIMI (Paket #%-5lu)     |\n", telemetryPacketsSent);
+  Serial.println("+-------------------------------------------------------------+");
+  Serial.printf ("| mmWave Radar  : %-14s | Masofa: %3d sm (OUT:%d)   |\n", rStatus.c_str(), radarDistanceCm, radarOutVal);
+  Serial.printf ("| Ovoz / Sirena : %-14s | Audio: %-18s |\n", sirenActive ? "YOQILGAN(FAOL)" : "O'chiq", sirenActive ? "1400-3200Hz Modul" : "Sukut");
+  Serial.printf ("| Servo (IO46)  : %3d deg (45°-135°) | Rejim: %-14s |\n", currentServoAngle, autoServoPatrol ? "20s Patrul" : "Qo'lda");
+  Serial.printf ("| Batareya (IO3): %5.2f V   (Quvvat: %3d %%)                |\n", batteryVoltage, batteryPercent);
   Serial.printf ("| GPS (IO40/41) : %9.4f, %-9.4f (Qatorlar: %-4d)     |\n", gpsLatitude, gpsLongitude, gpsSentencesParsed);
-  Serial.printf ("| Servo (IO46)  : %3d deg (45°-135°) | Sirena: %-13s |\n", currentServoAngle, sirenActive ? "YOQILGAN(TO'XT)" : "O'chiq");
-  Serial.printf ("| Patrol Rejimi : %-10s (45°->135°->45° / 20s sekin)    |\n", autoServoPatrol ? "20s FAOL" : "QO'LDA");
   Serial.printf ("| Wi-Fi Tarmogi : %-10s (RSSI: %-3d dBm, SSID: %s) |\n", 
                  WiFi.status() == WL_CONNECTED ? "ULANGAN" : "UZILGAN", WiFi.RSSI(), WiFi.SSID().c_str());
-  Serial.printf ("| Video Oqimi   : %-5lu kadr (HTTP %-3d)                       |\n", framesUploaded, lastUploadHttpCode);
+  Serial.printf ("| Video Oqimi   : %-5lu kadr (HTTP %-3d, VGA 640x480)         |\n", framesUploaded, lastUploadHttpCode);
   Serial.printf ("| Server Aloqasi: HTTP %-3d (%s) |\n", lastHttpResponseCode, server_urls[activeServerIdx]);
   Serial.println("+-------------------------------------------------------------+");
 }
@@ -665,7 +625,6 @@ void streamUploadTask(void *pvParameters) {
 // ---------------------- SETUP & LOOP -------------------------
 void setup() {
   Serial.begin(115200);
-  Serial.setTxTimeoutMs(0);
   delay(1200);
 
   Serial.println("\n\n=======================================================");
@@ -674,7 +633,6 @@ void setup() {
   Serial.println("=======================================================");
 
   pinMode(BOARD_LED, OUTPUT);
-  pinMode(SOIL_PIN, INPUT);
   pinMode(BATT_ADC_PIN, INPUT);
   pinMode(RADAR_OUT_PIN, INPUT); // Mustaqil GPIO 39
 
@@ -688,24 +646,13 @@ void setup() {
   lastPatrolStep = millis();
   Serial.println("[SETUP] Servo GPIO 46 (LEDC Channel 0) ga biriktirildi. Default: 90°.");
 
-  // Channel 2 (Timer 1): Sirena uchun 2000Hz
+  // Channel 2 (Timer 1): Sirena uchun 2000Hz (Hayvon qo'rqituvchi karnay)
   ledcAttachChannel(SIREN_PIN, 2000, SIREN_LEDC_RES, SIREN_LEDC_CHANNEL);
   ledcWrite(SIREN_PIN, 0); // Sukut saqlash
   Serial.println("[SETUP] Sirena GPIO 45 (LEDC Channel 2) ga biriktirildi. Timerlar to'liq ajratildi.");
 
-  // 2. I2C va HTU21 Sensori
-  Serial.printf("[SETUP] I2C shina ishga tushirilmoqda (SDA: GPIO %d, SCL: GPIO %d)...\n", BOARD_I2C_SDA, BOARD_I2C_SCL);
-  Wire.begin(BOARD_I2C_SDA, BOARD_I2C_SCL);
-  if (htu.begin(&Wire)) {
-    htuFound = true;
-    Serial.printf("[OK HTU21] Sensori topildi! Harorat = %.1f C, Namlik = %.1f %%\n",
-                  htu.readTemperature(), htu.readHumidity());
-  } else {
-    Serial.println("[OGOHLANTIRISH] HTU21 I2C sensori topilmadi (zaxira rejimga o'tildi).");
-  }
-
-  // 3. Tuproq Sensori & Radar OUT
-  Serial.printf("[SETUP] Tuproq Sensori: GPIO %d (ADC), Radar OUT: GPIO %d\n", SOIL_PIN, RADAR_OUT_PIN);
+  // 2. mmWave Radar OUT & Batareya ADC
+  Serial.printf("[SETUP] mmWave Radar OUT: GPIO %d, Batareya ADC: GPIO %d\n", RADAR_OUT_PIN, BATT_ADC_PIN);
 
   // 4. GPS (Serial1: GPIO 40 RX, GPIO 41 TX @ 9600 baud)
   Serial.printf("[SETUP] Serial1 (GPS): RX=GPIO %d, TX=GPIO %d @ 9600 baud.\n", GPS_RX_PIN, GPS_TX_PIN);

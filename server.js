@@ -30,10 +30,6 @@ const systemState = {
     camera_online: false
   },
   telemetry: {
-    soil: 65,
-    soil_raw: 2100,
-    temperature: 26.5,
-    humidity: 45.0,
     battery: 95,
     battery_voltage: 4.15,
     radar: 0,
@@ -191,11 +187,7 @@ app.post('/api/telemetry', (req, res) => {
     systemState.gateway.last_seen = now;
   }
 
-  // Dala datchiklari ma'lumotlari
-  if (data.soil !== undefined) systemState.telemetry.soil = data.soil;
-  if (data.soil_raw !== undefined) systemState.telemetry.soil_raw = data.soil_raw;
-  if (data.temperature !== undefined) systemState.telemetry.temperature = data.temperature;
-  if (data.humidity !== undefined) systemState.telemetry.humidity = data.humidity;
+  // Dala ko'rsatkichlari (Radar, Batareya, GPS)
   if (data.battery !== undefined) systemState.telemetry.battery = data.battery;
   if (data.battery_voltage !== undefined) systemState.telemetry.battery_voltage = data.battery_voltage;
   if (data.radar !== undefined) systemState.telemetry.radar = data.radar;
