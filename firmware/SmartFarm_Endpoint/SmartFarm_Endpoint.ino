@@ -18,9 +18,9 @@
   4. Hayvon qo'rqituvchi sirena: 1400Hz - 3200Hz yirtqich/tashvish modulyatsiyasi
   5. Kamera: 180° ga to'g'ri o'girilgan (vflip=0, hmirror=0) va /flip API faol
   6. Pinlar:
-     - mmWave Radar: RX=GPIO 44, TX=GPIO 43, OUT=GPIO 39 (HLK-LD2410C)
-     - Kamera: J4 sloti (OV2640 VGA 640x480)
-     - Sirena / Kalonka: GPIO 45 (Channel 2 Audio Tone 1400-3200Hz)
+     - mmWave Radar: RX=GPIO 7, TX=GPIO 6, OUT=GPIO 45 (HLK-LD2410C)
+     - Kamera: J4 sloti (OV2640 VGA 640x480 - 8-bit DVP shina)
+     - Sirena / Kalonka: GPIO 15 (Channel 2 Audio Tone 1400-3200Hz)
      - Servo: GPIO 46 (Channel 0 Pan 45°-135°)
      - GPS: RX=GPIO 40, TX=GPIO 41 (NEO-6M)
      - Batareya: GPIO 3 (VBAT-DET)
@@ -39,16 +39,16 @@
 #define BOARD_LED        38
 #define SERVO_PIN        46   // 180° Pan Servo (LEDC Channel 0)
 #define BATT_ADC_PIN     3    // VBAT-DET (Bortdagi 100k/100k bo'luvchi)
-#define SIREN_PIN        45   // Karnay / Sirena drayveri (LEDC Channel 2)
+#define SIREN_PIN        15   // Karnay / Sirena drayveri (LEDC Channel 2) - GPIO 15 ga ko'chirildi
 
 // GPS: GPIO 40 va 41 pinlari
 #define GPS_RX_PIN       40   // Serial1 RX: GPS TX dan o'qish (9600 baud)
 #define GPS_TX_PIN       41   // Serial1 TX: GPS RX ga (9600 baud)
 
-// mmWave RADAR: TX, RX va yangi alohida OUT pini (HLK-LD2410C)
-#define RADAR_RX_PIN     44   // Serial2 RX: Radar TX dan o'qish (256000 baud)
-#define RADAR_TX_PIN     43   // Serial2 TX: Radar RX ga
-#define RADAR_OUT_PIN    39   // HLK-LD2410C OUT raqamli kirish (Header 2, Pin 10)
+// mmWave RADAR: TX, RX va OUT pini (HLK-LD2410C) - Yangi xavfsiz pinlar
+#define RADAR_RX_PIN     7    // Serial2 RX: Radar TX dan o'qish (256000 baud)
+#define RADAR_TX_PIN     6    // Serial2 TX: Radar RX ga
+#define RADAR_OUT_PIN    45   // HLK-LD2410C OUT raqamli kirish (GPIO 45)
 
 // LilyGO T-Halow Rasmiy Kamera Pinlari (J4 Sloti)
 #define CAMERA_PIN_PWDN     (-1)
@@ -408,10 +408,9 @@ static esp_err_t index_handler(httpd_req_t *req) {
   html += "<body style='background:#111;color:#eee;font-family:sans-serif;padding:25px;'>";
   html += "<h2>Aqlli Ferma - Endpoint Node Diagnostika</h2>";
   html += "<p><b>IP Manzil:</b> " + WiFi.localIP().toString() + "</p>";
-  html += "<p><b>mmWave Radar (HLK-LD2410C):</b> " + String(radarPresence ? "Nishon Aniqlandi!" : "Tinch") + " | Masofa: " + String(radarDistanceCm) + " sm | OUT (IO39): " + String(radarOutVal) + "</p>";
-  html += "<p><b>Ovoz / Sirena:</b> " + String(sirenActive ? "YOQILGAN (Xavf/Qo'rqitish)" : "O'chiq (Tinch)") + "</p>";
+  html += "<p><b>mmWave Radar (HLK-LD2410C):</b> " + String(radarPresence ? "Nishon Aniqlandi!" : "Tinch") + " | Masofa: " + String(radarDistanceCm) + " sm | OUT (IO45): " + String(radarOutVal) + " (RX:7, TX:6)</p>";
+  html += "<p><b>Ovoz / Sirena (GPIO 15):</b> " + String(sirenActive ? "YOQILGAN (Xavf/Qo'rqitish)" : "O'chiq (Tinch)") + "</p>";
   html += "<p><b>Batareya:</b> " + String(batteryVoltage, 2) + " V (" + String(batteryPercent) + " %)</p>";
-  html += "<p><b>Radar (GPIO 44/43/39):</b> " + String(radarPresence ? "Harakat bor" : "Tinch") + " | Masofa: " + String(radarDistanceCm) + " sm | OUT: " + String(radarOutVal) + "</p>";
   html += "<p><b>GPS (GPIO 40/41):</b> " + String(gpsLatitude, 6) + ", " + String(gpsLongitude, 6) + "</p>";
   html += "<p><b>Servo (GPIO 46):</b> " + String(currentServoAngle) + "&deg; (Patrol: " + (autoServoPatrol ? "20s Faol (45°-135°)" : "Qo'lda") + ")</p>";
   html += "<p><b>Sirena:</b> " + String(sirenActive ? "YOQILGAN (Servo to'xtatilgan)" : "O'chiq") + "</p>";
@@ -649,16 +648,16 @@ void setup() {
   // Channel 2 (Timer 1): Sirena uchun 2000Hz (Hayvon qo'rqituvchi karnay)
   ledcAttachChannel(SIREN_PIN, 2000, SIREN_LEDC_RES, SIREN_LEDC_CHANNEL);
   ledcWrite(SIREN_PIN, 0); // Sukut saqlash
-  Serial.println("[SETUP] Sirena GPIO 45 (LEDC Channel 2) ga biriktirildi. Timerlar to'liq ajratildi.");
+  Serial.printf("[SETUP] Sirena GPIO %d (LEDC Channel 2) ga biriktirildi. Timerlar to'liq ajratildi.\n", SIREN_PIN);
 
   // 2. mmWave Radar OUT & Batareya ADC
   Serial.printf("[SETUP] mmWave Radar OUT: GPIO %d, Batareya ADC: GPIO %d\n", RADAR_OUT_PIN, BATT_ADC_PIN);
 
-  // 4. GPS (Serial1: GPIO 40 RX, GPIO 41 TX @ 9600 baud)
+  // 3. GPS (Serial1: GPIO 40 RX, GPIO 41 TX @ 9600 baud)
   Serial.printf("[SETUP] Serial1 (GPS): RX=GPIO %d, TX=GPIO %d @ 9600 baud.\n", GPS_RX_PIN, GPS_TX_PIN);
   Serial1.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
 
-  // 5. Radar HLK-LD2410C (Serial2: GPIO 44 RX, GPIO 43 TX @ 256000 baud)
+  // 4. Radar HLK-LD2410C (Serial2: GPIO 7 RX, GPIO 6 TX @ 256000 baud)
   Serial.printf("[SETUP] Serial2 (Radar): RX=GPIO %d, TX=GPIO %d @ 256000 baud.\n", RADAR_RX_PIN, RADAR_TX_PIN);
   Serial2.begin(256000, SERIAL_8N1, RADAR_RX_PIN, RADAR_TX_PIN);
 
