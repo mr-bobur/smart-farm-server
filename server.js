@@ -134,9 +134,34 @@ app.get('/video_feed', (req, res) => {
 app.post('/api/upload_frame', express.raw({ type: ['image/jpeg', 'application/octet-stream', '*/*'], limit: '15mb' }), (req, res) => {
   if (req.body && req.body.length > 100) {
     detector.pushFrame(req.body);
+    systemState.endpoint.online = true; // Video uzatilayotgan bo'lsa Endpoint 100% ONLINE!
     systemState.endpoint.camera_online = true;
     systemState.endpoint.last_seen = Math.floor(Date.now() / 1000);
     
+    // Kadr sarlavhasida kelgan radar ma'lumotlarini darhol yangilash (tezkor real-vaqt yangilanishi)
+    let radarChanged = false;
+    if (req.headers['x-radar-presence'] !== undefined) {
+      const p = parseInt(req.headers['x-radar-presence']) || 0;
+      if (systemState.telemetry.radar !== p) {
+        systemState.telemetry.radar = p;
+        radarChanged = true;
+      }
+    }
+    if (req.headers['x-radar-distance'] !== undefined) {
+      const d = parseInt(req.headers['x-radar-distance']) || 0;
+      if (systemState.telemetry.radar_distance !== d) {
+        systemState.telemetry.radar_distance = d;
+        radarChanged = true;
+      }
+    }
+
+    if (radarChanged) {
+      broadcastWs({
+        endpoint: systemState.endpoint,
+        telemetry: systemState.telemetry
+      });
+    }
+
     // Javobda boshqaruv signallarini qaytarish (ultra tez sinxronizatsiya)
     return res.json({
       status: "ok",
@@ -211,6 +236,15 @@ app.post('/api/telemetry', (req, res) => {
     servo_angle: systemState.servo_angle,
     siren_active: systemState.siren_active
   });
+});
+
+// Telemetriya va Tizim Holatini O'qish (GET)
+app.get('/api/telemetry', (req, res) => {
+  res.json(systemState.telemetry);
+});
+
+app.get('/api/state', (req, res) => {
+  res.json(systemState);
 });
 
 // Servo Burchagini Boshqarish (45° dan 135° gacha)
@@ -292,7 +326,7 @@ setInterval(() => {
   }
 
   if (systemState.endpoint.online) {
-    if ((now - systemState.endpoint.last_seen) > 10) {
+    if ((now - systemState.endpoint.last_seen) > 25) {
       systemState.endpoint.online = false;
       changed = true;
     }

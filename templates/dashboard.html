@@ -339,7 +339,7 @@
             <i class="fa-solid fa-location-dot text-rose-500"></i>
             Ferma Koordinatalari (GPS - IO40/41)
           </h3>
-          <span id="gpsCoords" class="text-[11px] font-mono text-gray-400">41.5505, 60.6312</span>
+          <span id="gpsCoords" class="text-[11px] font-mono text-gray-400">41.3924, 69.3666</span>
         </div>
         <div id="map" class="w-full h-40 rounded-xl overflow-hidden border border-gray-700 z-0"></div>
       </div>
@@ -374,11 +374,11 @@
     let lastEndpointTimestamp = 0;
 
     // Initialize Leaflet Map
-    const map = L.map('map').setView([41.55, 60.63], 13);
+    const map = L.map('map').setView([41.3923856, 69.3665599], 15);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap'
     }).addTo(map);
-    let marker = L.marker([41.55, 60.63]).addTo(map).bindPopup('Ferma Tuguni (Endpoint)').openPopup();
+    let marker = L.marker([41.3923856, 69.3665599]).addTo(map).bindPopup('Ferma Tuguni (Endpoint)').openPopup();
 
     // WebSocket for live updates
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
