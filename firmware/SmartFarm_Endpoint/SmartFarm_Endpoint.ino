@@ -41,14 +41,15 @@
 #define BATT_ADC_PIN     3    // VBAT-DET (Bortdagi 100k/100k bo'luvchi)
 #define SIREN_PIN        15   // Karnay / Sirena drayveri (LEDC Channel 2) - GPIO 15 ga ko'chirildi
 
-// GPS: GPIO 40 va 41 pinlari
-#define GPS_RX_PIN       40   // Serial1 RX: GPS TX dan o'qish (9600 baud)
-#define GPS_TX_PIN       41   // Serial1 TX: GPS RX ga (9600 baud)
+// GPS: GPIO 41 va 40 pinlari (Uskunaviy testda tasdiqlandi: GPS TX = GPIO 41!)
+#define GPS_RX_PIN       41   // Serial1 RX: GPS TX dan o'qish (9600 baud)
+#define GPS_TX_PIN       40   // Serial1 TX: GPS RX ga (9600 baud)
 
 // mmWave RADAR: TX, RX va OUT pini (HLK-LD2410C) - Yangi xavfsiz pinlar
 #define RADAR_RX_PIN     7    // Serial2 RX: Radar TX dan o'qish (256000 baud)
 #define RADAR_TX_PIN     6    // Serial2 TX: Radar RX ga
 #define RADAR_OUT_PIN    45   // HLK-LD2410C OUT raqamli kirish (GPIO 45)
+#define RADAR_OUT_PIN_ALT 39  // HLK-LD2410C OUT muqobil/zaxira kirish (GPIO 39)
 
 // LilyGO T-Halow Rasmiy Kamera Pinlari (J4 Sloti)
 #define CAMERA_PIN_PWDN     (-1)
@@ -201,13 +202,22 @@ int batteryPercent = 95;
 // Radar (HLK-LD2410C) Ko'rsatkichlari
 int radarPresence = 0;       // 0: Tinch, 1: Harakat, 2: Qo'zg'almas, 3: Ikkalasi
 int radarDistanceCm = 0;     // Nishongacha masofa (sm)
-int radarOutVal = 0;         // GPIO 39 OUT holati
+int radarOutVal = 0;         // GPIO 45 OUT holati
+uint8_t radarRxBuf[36];
+int radarRxIdx = 0;
+unsigned long lastRadarByteTime = 0;
+unsigned long lastRadarFrameParsed = 0;
+unsigned long radarTotalBytesReceived = 0;
 
 // NEO-6M GPS Ko'rsatkichlari
 float gpsLatitude = 41.5505;
 float gpsLongitude = 60.6312;
-String gpsRawBuffer = "";
+String gpsLineBuf = "";
 int gpsSentencesParsed = 0;
+unsigned long gpsTotalBytesReceived = 0;
+unsigned long lastGpsByteTime = 0;
+bool gpsHasFix = false;
+int gpsSatsVisible = 0;
 
 // Diagnostika va Statistika
 unsigned long lastTelemetrySend = 0;
@@ -456,6 +466,159 @@ void startHttpServers() {
   }
 }
 
+// ---------------------- REAL-TIME RADAR ENGINE (HLK-LD2410C) --
+void updateRadarStream() {
+  // 1. OUT pini (GPIO 45 yoki GPIO 39) doimiy o'qiladi
+  radarOutVal = digitalRead(RADAR_OUT_PIN) | digitalRead(RADAR_OUT_PIN_ALT);
+
+  // 2. Serial2 (RX: GPIO 7, TX: GPIO 6) baytlari asinxron o'qiladi
+  while (Serial2.available()) {
+    uint8_t b = Serial2.read();
+    radarTotalBytesReceived++;
+    lastRadarByteTime = millis();
+
+    // LD2410 Frame Header: 0xF4, 0xF3, 0xF2, 0xF1
+    if (radarRxIdx == 0) {
+      if (b == 0xF4) radarRxBuf[radarRxIdx++] = b;
+    } else if (radarRxIdx == 1) {
+      if (b == 0xF3) radarRxBuf[radarRxIdx++] = b;
+      else radarRxIdx = (b == 0xF4) ? 1 : 0;
+    } else if (radarRxIdx == 2) {
+      if (b == 0xF2) radarRxBuf[radarRxIdx++] = b;
+      else radarRxIdx = 0;
+    } else if (radarRxIdx == 3) {
+      if (b == 0xF1) radarRxBuf[radarRxIdx++] = b;
+      else radarRxIdx = 0;
+    } else {
+      if (radarRxIdx < 34) {
+        radarRxBuf[radarRxIdx++] = b;
+      } else {
+        radarRxIdx = 0;
+      }
+
+      // Basic Target Frame: kamida 23 bayt bo'ladi, oxiri 0xF8, 0xF7, 0xF6, 0xF5 bilan tugaydi
+      if (radarRxIdx >= 23) {
+        if (radarRxBuf[radarRxIdx - 4] == 0xF8 &&
+            radarRxBuf[radarRxIdx - 3] == 0xF7 &&
+            radarRxBuf[radarRxIdx - 2] == 0xF6 &&
+            radarRxBuf[radarRxIdx - 1] == 0xF5) {
+
+          // Kadr to'liq va xatosiz qabul qilindi!
+          // Protokol: Byte 8: Target status (0: Tinch, 1: Harakat, 2: Qo'zg'almas, 3: Ikkalasi)
+          // Byte 9-10: Moving target distance (sm)
+          // Byte 12-13: Stationary target distance (sm)
+          uint8_t state = radarRxBuf[8];
+          uint16_t moveDist = radarRxBuf[9] | (radarRxBuf[10] << 8);
+          uint16_t statDist = radarRxBuf[12] | (radarRxBuf[13] << 8);
+
+          radarPresence = state;
+          if (state == 1) {
+            radarDistanceCm = moveDist;
+          } else if (state == 2) {
+            radarDistanceCm = statDist;
+          } else if (state == 3) {
+            radarDistanceCm = (moveDist > 0 && statDist > 0) ? min(moveDist, statDist) : (moveDist > 0 ? moveDist : statDist);
+          } else {
+            radarDistanceCm = 0;
+          }
+
+          lastRadarFrameParsed = millis();
+          radarRxIdx = 0;
+        }
+      }
+    }
+  }
+
+  // Agar OUT pini HIGH bo'lsa, hatto UART kadr bermasa ham nishon bor deb qabul qilinadi
+  if (radarOutVal == HIGH && radarPresence == 0) {
+    radarPresence = 1;
+    if (radarDistanceCm == 0) radarDistanceCm = 150;
+  }
+}
+
+// ---------------------- REAL-TIME GPS ENGINE (NEO-6M) ---------
+void processGpsSentence(const String& s) {
+  // $GPRMC yoki $GNRMC (NMEA-0183 Standart)
+  if (s.startsWith("$GPRMC") || s.startsWith("$GNRMC")) {
+    gpsSentencesParsed++;
+
+    // Vergul orqali tokenlarni ajratish
+    int commaIdx[13];
+    int commaCount = 0;
+    for (int i = 0; i < s.length() && commaCount < 13; i++) {
+      if (s[i] == ',') commaIdx[commaCount++] = i;
+    }
+
+    // $GPRMC,hhmmss.ss,Status,Latitude,N/S,Longitude,E/W,...
+    // Token 0: $GPRMC
+    // Token 1: hhmmss.ss
+    // Token 2: Status ('A'=Valid, 'V'=Void)
+    // Token 3: Latitude (ddmm.mmmm)
+    // Token 4: N/S
+    // Token 5: Longitude (dddmm.mmmm)
+    // Token 6: E/W
+    if (commaCount >= 6) {
+      char status = s[commaIdx[1] + 1]; // 'A' = Valid Fix, 'V' = Void (kutilmoqda)
+      if (status == 'A') {
+        gpsHasFix = true;
+        String rawLat = s.substring(commaIdx[2] + 1, commaIdx[3]);
+        char ns = s[commaIdx[3] + 1];
+        String rawLon = s.substring(commaIdx[4] + 1, commaIdx[5]);
+        char ew = s[commaIdx[5] + 1];
+
+        if (rawLat.length() >= 6 && rawLon.length() >= 7) {
+          // ddmm.mmmm -> daraja
+          float latDeg = rawLat.substring(0, 2).toFloat();
+          float latMin = rawLat.substring(2).toFloat();
+          float lat = latDeg + (latMin / 60.0);
+          if (ns == 'S' || ns == 's') lat = -lat;
+
+          // dddmm.mmmm -> daraja
+          float lonDeg = rawLon.substring(0, 3).toFloat();
+          float lonMin = rawLon.substring(3).toFloat();
+          float lon = lonDeg + (lonMin / 60.0);
+          if (ew == 'W' || ew == 'w') lon = -lon;
+
+          if (lat != 0.0 && lon != 0.0) {
+            gpsLatitude = lat;
+            gpsLongitude = lon;
+          }
+        }
+      } else {
+        gpsHasFix = false; // Sun'iy yo'ldoshlar qidirilmoqda
+      }
+    }
+  } else if (s.startsWith("$GPGGA") || s.startsWith("$GNGGA")) {
+    int commaIdx[9];
+    int count = 0;
+    for (int i = 0; i < s.length() && count < 9; i++) {
+      if (s[i] == ',') commaIdx[count++] = i;
+    }
+    if (count >= 8) {
+      gpsSatsVisible = s.substring(commaIdx[6] + 1, commaIdx[7]).toInt();
+    }
+  }
+}
+
+void updateGpsStream() {
+  while (Serial1.available()) {
+    char c = (char)Serial1.read();
+    gpsTotalBytesReceived++;
+    lastGpsByteTime = millis();
+
+    if (c == '\n' || c == '\r') {
+      if (gpsLineBuf.length() > 6) {
+        processGpsSentence(gpsLineBuf);
+      }
+      gpsLineBuf = "";
+    } else {
+      if (gpsLineBuf.length() < 120) {
+        gpsLineBuf += c;
+      }
+    }
+  }
+}
+
 // ---------------------- SENSORS READING ----------------------
 void readSensors() {
   // 1. Batareya Quvvati (VBAT-DET - GPIO 3)
@@ -475,56 +638,6 @@ void readSensors() {
     batteryVoltage = 4.20;
   } else {
     batteryPercent = constrain(map((long)(batteryVoltage * 100), 330, 420, 0, 100), 0, 100);
-  }
-
-  // 4. HLK-LD2410C Radar (Serial2 GPIO 44 RX & Yangi GPIO 39 OUT)
-  radarOutVal = digitalRead(RADAR_OUT_PIN);
-  if (radarOutVal == HIGH && radarPresence == 0) {
-    radarPresence = 1; // OUT pini orqali harakat nishoni
-  }
-
-  while (Serial2.available()) {
-    uint8_t b = Serial2.read();
-    if (b == 0xF4 && Serial2.peek() == 0xF3) {
-      uint8_t frame[24];
-      frame[0] = b;
-      int len = Serial2.readBytes(&frame[1], 22);
-      if (len >= 12 && frame[1] == 0xF3 && frame[2] == 0xF2 && frame[3] == 0xF1) {
-        radarPresence = frame[7];
-        radarDistanceCm = frame[8] | (frame[9] << 8);
-        Serial.printf("[DEBUG RADAR] Nishon: %d, Masofa: %d sm, OUT: %d\n", radarPresence, radarDistanceCm, radarOutVal);
-      }
-    }
-  }
-
-  // 5. NEO-6M GPS (Serial1 - GPIO 40 RX @ 9600 baud)
-  while (Serial1.available()) {
-    char c = Serial1.read();
-    if (c == '\n') {
-      if (gpsRawBuffer.startsWith("$GPRMC") || gpsRawBuffer.startsWith("$GPGGA")) {
-        gpsSentencesParsed++;
-        int c1 = gpsRawBuffer.indexOf(',');
-        int c2 = gpsRawBuffer.indexOf(',', c1 + 1);
-        int c3 = gpsRawBuffer.indexOf(',', c2 + 1);
-        int c4 = gpsRawBuffer.indexOf(',', c3 + 1);
-        int c5 = gpsRawBuffer.indexOf(',', c4 + 1);
-        int c6 = gpsRawBuffer.indexOf(',', c5 + 1);
-        if (c3 > 0 && c5 > 0 && c4 > c3 && c6 > c5) {
-          String rawLat = gpsRawBuffer.substring(c3 + 1, c4);
-          String rawLng = gpsRawBuffer.substring(c5 + 1, c6);
-          if (rawLat.length() > 4 && rawLng.length() > 4) {
-            float dLat = rawLat.substring(0, 2).toFloat() + rawLat.substring(2).toFloat() / 60.0;
-            float dLng = rawLng.substring(0, 3).toFloat() + rawLng.substring(3).toFloat() / 60.0;
-            if (dLat > 0) gpsLatitude = dLat;
-            if (dLng > 0) gpsLongitude = dLng;
-            Serial.printf("[DEBUG GPS] Koordinatalar: %.4f, %.4f\n", gpsLatitude, gpsLongitude);
-          }
-        }
-      }
-      gpsRawBuffer = "";
-    } else if (c != '\r') {
-      gpsRawBuffer += c;
-    }
   }
 }
 
@@ -567,24 +680,31 @@ void sendTelemetry() {
 
 // ---------------------- SERIAL MONITOR LOGGER ----------------
 void printPeriodicDiagnostics() {
-  String rStatus = "Tinch";
+  String rStatus = "Tinch (Nishon yo'q)";
   if (radarPresence == 1) rStatus = "Harakat!";
   else if (radarPresence == 2) rStatus = "Qo'zg'almas";
   else if (radarPresence == 3) rStatus = "Harakat+Mavjud";
 
-  Serial.println("\n+-------------------------------------------------------------+");
-  Serial.printf ("| [DIAGNOSTIKA] AQLLI FERMA MUHOFAZA TIZIMI (Paket #%-5lu)     |\n", telemetryPacketsSent);
-  Serial.println("+-------------------------------------------------------------+");
-  Serial.printf ("| mmWave Radar  : %-14s | Masofa: %3d sm (OUT:%d)   |\n", rStatus.c_str(), radarDistanceCm, radarOutVal);
-  Serial.printf ("| Ovoz / Sirena : %-14s | Audio: %-18s |\n", sirenActive ? "YOQILGAN(FAOL)" : "O'chiq", sirenActive ? "1400-3200Hz Modul" : "Sukut");
-  Serial.printf ("| Servo (IO46)  : %3d deg (45°-135°) | Rejim: %-14s |\n", currentServoAngle, autoServoPatrol ? "20s Patrul" : "Qo'lda");
-  Serial.printf ("| Batareya (IO3): %5.2f V   (Quvvat: %3d %%)                |\n", batteryVoltage, batteryPercent);
-  Serial.printf ("| GPS (IO40/41) : %9.4f, %-9.4f (Qatorlar: %-4d)     |\n", gpsLatitude, gpsLongitude, gpsSentencesParsed);
-  Serial.printf ("| Wi-Fi Tarmogi : %-10s (RSSI: %-3d dBm, SSID: %s) |\n", 
+  Serial.println("\n+-------------------------------------------------------------------------+");
+  Serial.printf ("| [DIAGNOSTIKA] AQLLI FERMA MUHOFAZA TIZIMI (Paket #%-5lu)                 |\n", telemetryPacketsSent);
+  Serial.println("+-------------------------------------------------------------------------+");
+  Serial.printf ("| mmWave Radar  : %-18s | Masofa: %3d sm | OUT (IO45): %d     |\n", rStatus.c_str(), radarDistanceCm, radarOutVal);
+  Serial.printf ("| Radar UART(7/6): %-5lu bayt qabul qilindi | Oxirgi bayt: %lu ms oldin   |\n", 
+                 radarTotalBytesReceived, lastRadarByteTime > 0 ? (millis() - lastRadarByteTime) : 9999);
+  Serial.printf ("| GPS (IO41/40) : %-18s | Sun'iy yo'ldoshlar: %-3d             |\n", 
+                 gpsHasFix ? "FAOL (FIX BOR)" : "QIDIRILMOQDA (V)", gpsSatsVisible);
+  Serial.printf ("| GPS Koordinata: %9.4f, %-9.4f | Jami NMEA qatorlari: %-5d       |\n", 
+                 gpsLatitude, gpsLongitude, gpsSentencesParsed);
+  Serial.printf ("| GPS UART(41/40): %-5lu bayt qabul qilindi | Oxirgi bayt: %lu ms oldin   |\n", 
+                 gpsTotalBytesReceived, lastGpsByteTime > 0 ? (millis() - lastGpsByteTime) : 9999);
+  Serial.printf ("| Ovoz / Sirena : %-14s | Audio (IO15): %-22s |\n", sirenActive ? "YOQILGAN(FAOL)" : "O'chiq", sirenActive ? "1400-3200Hz Modul" : "Sukut");
+  Serial.printf ("| Servo (IO46)  : %3d deg (45°-135°) | Rejim: %-22s       |\n", currentServoAngle, autoServoPatrol ? "20s Patrul" : "Qo'lda");
+  Serial.printf ("| Batareya (IO3): %5.2f V   (Quvvat: %3d %%)                            |\n", batteryVoltage, batteryPercent);
+  Serial.printf ("| Wi-Fi Tarmogi : %-10s (RSSI: %-3d dBm, SSID: %s)             |\n", 
                  WiFi.status() == WL_CONNECTED ? "ULANGAN" : "UZILGAN", WiFi.RSSI(), WiFi.SSID().c_str());
-  Serial.printf ("| Video Oqimi   : %-5lu kadr (HTTP %-3d, VGA 640x480)         |\n", framesUploaded, lastUploadHttpCode);
+  Serial.printf ("| Video Oqimi   : %-5lu kadr (HTTP %-3d, VGA 640x480)                     |\n", framesUploaded, lastUploadHttpCode);
   Serial.printf ("| Server Aloqasi: HTTP %-3d (%s) |\n", lastHttpResponseCode, server_urls[activeServerIdx]);
-  Serial.println("+-------------------------------------------------------------+");
+  Serial.println("+-------------------------------------------------------------------------+");
 }
 
 // ---------------------- STREAM PUSH TASK (Core 0) ------------
@@ -633,7 +753,8 @@ void setup() {
 
   pinMode(BOARD_LED, OUTPUT);
   pinMode(BATT_ADC_PIN, INPUT);
-  pinMode(RADAR_OUT_PIN, INPUT); // Mustaqil GPIO 39
+  pinMode(RADAR_OUT_PIN, INPUT_PULLDOWN);     // GPIO 45 OUT
+  pinMode(RADAR_OUT_PIN_ALT, INPUT_PULLDOWN); // GPIO 39 OUT zaxira muqobil
 
   digitalWrite(BOARD_LED, LOW);
 
@@ -712,6 +833,10 @@ void loop() {
   if (WiFi.status() != WL_CONNECTED) {
     wifiMulti.run();
   }
+
+  // Real-time radar va GPS oqimlarini asinxron o'qish (Hech qachon bufer to'lib ketmasligi uchun har tsiklda)
+  updateRadarStream();
+  updateGpsStream();
 
   // Servo sekin 20 soniyalik patrullash (sirena chalganda to'xtaydi)
   updateServoPatrol();
