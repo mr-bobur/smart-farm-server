@@ -51,6 +51,10 @@
 #define RADAR_OUT_PIN    45   // HLK-LD2410C OUT raqamli kirish (GPIO 45)
 #define RADAR_OUT_PIN_ALT 39  // HLK-LD2410C OUT muqobil/zaxira kirish (GPIO 39)
 
+// T-HaLow (TX-AH-R900P) TTL UART Pinlari (Bortdagi apparat modul)
+#define HALOW_RX_PIN     5    // UART0 RX: TX-AH TX dan (115200 baud)
+#define HALOW_TX_PIN     4    // UART0 TX: TX-AH RX ga (115200 baud)
+
 // LilyGO T-Halow Rasmiy Kamera Pinlari (J4 Sloti)
 #define CAMERA_PIN_PWDN     (-1)
 #define CAMERA_PIN_RESET    (18)
@@ -219,6 +223,11 @@ unsigned long lastGpsByteTime = 0;
 bool gpsHasFix = false;
 int gpsSatsVisible = 0;
 
+// T-HaLow (TX-AH-R900P) Diagnostika Ko'rsatkichlari
+HardwareSerial SerialHalow(0);
+bool halowDetected = false;
+String halowInfo = "Kutilmoqda...";
+
 // Diagnostika va Statistika
 unsigned long lastTelemetrySend = 0;
 unsigned long lastSensorRead = 0;
@@ -276,9 +285,9 @@ bool initCamera() {
 
   sensor_t * s = esp_camera_sensor_get();
   if (s) {
-    // 180° ga to'g'ri burish
-    s->set_vflip(s, 0);
-    s->set_hmirror(s, 0);
+    // 180° ga to'nkarilgan holatga burish (foydalanuvchi talabi)
+    s->set_vflip(s, 1);
+    s->set_hmirror(s, 1);
     // Maksimal tiniqlik va sifat uchun sensor sozlamalari
     s->set_brightness(s, 1);
     s->set_contrast(s, 1);
@@ -702,6 +711,8 @@ void printPeriodicDiagnostics() {
   Serial.printf ("| Batareya (IO3): %5.2f V   (Quvvat: %3d %%)                            |\n", batteryVoltage, batteryPercent);
   Serial.printf ("| Wi-Fi Tarmogi : %-10s (RSSI: %-3d dBm, SSID: %s)             |\n", 
                  WiFi.status() == WL_CONNECTED ? "ULANGAN" : "UZILGAN", WiFi.RSSI(), WiFi.SSID().c_str());
+  Serial.printf ("| T-HaLow (IO5/4): %-18s | Holat: %-26s |\n", 
+                 halowDetected ? "ANIQLANDI (ONBOARD)" : "KUTILMOQDA / O'CHIQ", halowInfo.c_str());
   Serial.printf ("| Video Oqimi   : %-5lu kadr (HTTP %-3d, VGA 640x480)                     |\n", framesUploaded, lastUploadHttpCode);
   Serial.printf ("| Server Aloqasi: HTTP %-3d (%s) |\n", lastHttpResponseCode, server_urls[activeServerIdx]);
   Serial.println("+-------------------------------------------------------------------------+");
@@ -781,6 +792,27 @@ void setup() {
   // 4. Radar HLK-LD2410C (Serial2: GPIO 7 RX, GPIO 6 TX @ 256000 baud)
   Serial.printf("[SETUP] Serial2 (Radar): RX=GPIO %d, TX=GPIO %d @ 256000 baud.\n", RADAR_RX_PIN, RADAR_TX_PIN);
   Serial2.begin(256000, SERIAL_8N1, RADAR_RX_PIN, RADAR_TX_PIN);
+
+  // 5. T-HaLow TX-AH-R900P Moduli (UART0: GPIO 5 RX, GPIO 4 TX @ 115200 baud)
+  Serial.printf("[SETUP] T-HaLow TX-AH: RX=GPIO %d, TX=GPIO %d @ 115200 baud.\n", HALOW_RX_PIN, HALOW_TX_PIN);
+  SerialHalow.begin(115200, SERIAL_8N1, HALOW_RX_PIN, HALOW_TX_PIN);
+  delay(40);
+  SerialHalow.print("AT\r\n");
+  delay(120);
+  if (SerialHalow.available()) {
+    String resp = SerialHalow.readString();
+    resp.trim();
+    if (resp.indexOf("OK") >= 0) {
+      halowDetected = true;
+      halowInfo = "TX-AH Faol (AT OK)";
+      Serial.println("[OK HALOW] Bortdagi TX-AH-R900P HaLow moduli muvaffaqiyatli aniqlandi!");
+    } else {
+      halowInfo = resp.substring(0, 24);
+      Serial.printf("[HALOW] Modul javobi: %s\n", halowInfo.c_str());
+    }
+  } else {
+    Serial.println("[HALOW] TX-AH modulidan javob kelmadi (Kutish rejimida).");
+  }
 
   // 6. OV2640 Kamera (8MB OPI PSRAM)
   initCamera();
